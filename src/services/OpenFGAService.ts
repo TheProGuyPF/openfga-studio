@@ -1,13 +1,15 @@
 // OpenFGA API service
 import axios from 'axios';
-import { dslToJson, jsonToDsl } from '../utils/modelConverter'; 
+import { dslToJson, jsonToDsl } from '../utils/modelConverter';
+import { config } from '../config';
 
 // Create axios instance with common config
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: config.apiUrl || '/api',
   headers: {
     'Accept': 'application/json',
     'Content-Type': 'application/json',
+    ...(config.apiToken && { 'Authorization': `Bearer ${config.apiToken}` }),
   }
 });
 
