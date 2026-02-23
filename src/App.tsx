@@ -2,6 +2,7 @@ import { useState, useMemo, Suspense, lazy } from 'react';
 import { Box, CssBaseline, ThemeProvider, createTheme, Tabs, Tab } from '@mui/material';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import { OpenFGAService } from './services/OpenFGAService';
+import { TokenProvider } from './contexts/TokenContext';
 import './App.css';
 
 const AuthModelTab = lazy(() => import('./components/AuthModelTab/AuthModelTab'));
@@ -49,6 +50,7 @@ function App() {
   };
 
   return (
+    <TokenProvider>
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ 
@@ -57,7 +59,7 @@ function App() {
         height: '100vh',
         bgcolor: 'background.default',
         color: 'text.primary',
-        overflow: 'hidden' // Prevent scrolling at root
+        overflow: 'hidden'
       }}>
         <AppHeader
           selectedStore={selectedStoreId}
@@ -126,6 +128,7 @@ function App() {
         </Box>
       </Box>
     </ThemeProvider>
+    </TokenProvider>
   );
 }
 

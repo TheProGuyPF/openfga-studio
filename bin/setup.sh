@@ -172,9 +172,28 @@ EOF
 fi
 export OPENFGA_GRPC_BLOCK
 
+# Token-service reverse proxy (optional)
+TOKEN_SERVICE_URL=${TOKEN_SERVICE_URL:-}
+TOKEN_SERVICE_BLOCK=''
+if [ -n "${TOKEN_SERVICE_URL}" ]; then
+  TOKEN_SERVICE_BLOCK=$(cat <<EOF
+        location /token-service {
+            proxy_pass ${TOKEN_SERVICE_URL};
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_ssl_server_name on;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 15s;
+        }
+EOF
+)
+  echo "Token-service proxy configured -> ${TOKEN_SERVICE_URL}"
+fi
+export TOKEN_SERVICE_BLOCK
+
 # Render templates into place
 if [ -f /etc/nginx/nginx.conf.template ]; then
-  envsubst '${OPENFGA_HOST} ${OPENFGA_HTTP_PORT} ${OPENFGA_GRPC_PORT} ${UI_PORT} ${OPENFGA_ENDPOINT} ${OPENFGA_SCHEME} ${OPENFGA_GRPC_SCHEME} ${OPENFGA_GRPC_BLOCK} ${OPENFGA_PATH_PREFIX}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+  envsubst '${OPENFGA_HOST} ${OPENFGA_HTTP_PORT} ${OPENFGA_GRPC_PORT} ${UI_PORT} ${OPENFGA_ENDPOINT} ${OPENFGA_SCHEME} ${OPENFGA_GRPC_SCHEME} ${OPENFGA_GRPC_BLOCK} ${OPENFGA_PATH_PREFIX} ${TOKEN_SERVICE_BLOCK}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
   echo "Rendered /etc/nginx/nginx.conf from template"
   echo "--- Rendered nginx.conf (first 80 lines) ---"
   sed -n '1,80p' /etc/nginx/nginx.conf || true

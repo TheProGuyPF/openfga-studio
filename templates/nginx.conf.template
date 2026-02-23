@@ -65,6 +65,9 @@ http {
         # OpenFGA gRPC
 ${OPENFGA_GRPC_BLOCK}
 
+        # X2S token-service reverse proxy (injected when TOKEN_SERVICE_URL is set)
+${TOKEN_SERVICE_BLOCK}
+
         # Health check endpoint
         location /health {
             access_log off;

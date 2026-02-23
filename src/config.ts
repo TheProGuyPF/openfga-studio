@@ -5,6 +5,9 @@ export const config = {
   apiVersion: "v1",
   storeId: import.meta.env.VITE_OPENFGA_STORE_ID || "",
   apiToken: import.meta.env.VITE_OPENFGA_API_TOKEN || "",
+  tokenServiceUrl: import.meta.env.VITE_TOKEN_SERVICE_URL || "",
+  tokenServiceAudience: import.meta.env.VITE_TOKEN_SERVICE_AUDIENCE || "",
+  x2sToken: import.meta.env.VITE_FGA_X2S_TOKEN || "",
   defaultAuthorizationModel: `model
   schema 1.1
 

@@ -2,15 +2,22 @@
 import axios from 'axios';
 import { dslToJson, jsonToDsl } from '../utils/modelConverter';
 import { config } from '../config';
+import { getApiToken } from './tokenStore';
 
-// Create axios instance with common config
 const api = axios.create({
   baseURL: config.apiUrl || '/api',
   headers: {
     'Accept': 'application/json',
     'Content-Type': 'application/json',
-    ...(config.apiToken && { 'Authorization': `Bearer ${config.apiToken}` }),
+  },
+});
+
+api.interceptors.request.use((reqConfig) => {
+  const token = getApiToken();
+  if (token) {
+    reqConfig.headers.Authorization = `Bearer ${token}`;
   }
+  return reqConfig;
 });
 
 interface RelationshipTuple {
