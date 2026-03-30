@@ -5,10 +5,13 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { StoreSelect } from '../StoreSelect/StoreSelect';
+import { ConnectionInfo } from '../ConnectionInfo/ConnectionInfo';
 import { useToken } from '../../contexts/TokenContext';
 
 interface AppHeaderProps {
   selectedStore: string;
+  storeName: string;
+  authModelId: string;
   onStoreChange: (storeId: string, storeName: string) => void;
   onToggleTheme: () => void;
 }
@@ -18,7 +21,7 @@ function formatTimestamp(ts: number | null): string {
   return new Date(ts).toLocaleTimeString();
 }
 
-export const AppHeader = ({ selectedStore, onStoreChange, onToggleTheme }: AppHeaderProps) => {
+export const AppHeader = ({ selectedStore, storeName, authModelId, onStoreChange, onToggleTheme }: AppHeaderProps) => {
   const theme = useTheme();
   const { tokenStatus, error, lastRefreshedAt, refresh, isConfigured } = useToken();
 
@@ -48,6 +51,12 @@ export const AppHeader = ({ selectedStore, onStoreChange, onToggleTheme }: AppHe
             onStoreChange={onStoreChange}
           />
         </Box>
+
+        <ConnectionInfo
+          storeId={selectedStore}
+          storeName={storeName}
+          authModelId={authModelId}
+        />
 
         {isConfigured && (
           <Tooltip title={tokenTooltip()}>

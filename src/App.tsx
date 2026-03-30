@@ -63,6 +63,8 @@ function App() {
       }}>
         <AppHeader
           selectedStore={selectedStoreId}
+          storeName={selectedStoreName}
+          authModelId={authModelId}
           onStoreChange={handleStoreChange}
           onToggleTheme={() => setMode(mode === 'light' ? 'dark' : 'light')}
         />
