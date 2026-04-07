@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * Migrates user-institution rows from a CSV file into OpenFGA relationship tuples.
+ * Migrates assessment rows from a CSV into structural OpenFGA tuples:
+ * `parent_template` and `parent_institution` on `assessment` (see assessments.fga).
+ * Writes set `on_duplicate: ignore` so tuples that already exist are skipped without failing the batch.
+ * CSV must be RFC 4180 (quoted fields may contain commas and newlines); do not use naive comma-splitting exports.
+ *
+ * Fetch the upstream model for reference (requires GitHub CLI auth):
+ *   gh api repos/moodys-ma-platform/mx-authorization/contents/crates/openfga-http-migrator/src/authmodels/v1.1/assessments.fga --jq '.content' | base64 -d
  *
  * Usage:
- *   node scripts/migrate-tuples.mjs --csv <path> --model-id <id> [--dry-run] [--batch-size <n>]
- * 
+ *   node scripts/migrate-assessment-tuples.mjs --csv <path> --model-id <id> [--dry-run] [--batch-size <n>]
+ *
  * Examples:
- *   # Preview the tuples without writing anything
- *   node scripts/migrate-tuples.mjs --csv path/to/your-data.csv --dry-run
- *
- *   # Execute the migration
- *   node scripts/migrate-tuples.mjs --csv path/to/your-data.csv --model-id <your-authorization-model-id>
- *
- *   # With a custom batch size
- *   node scripts/migrate-tuples.mjs --csv path/to/your-data.csv --model-id <id> --batch-size 50
+ *   node scripts/migrate-assessment-tuples.mjs --csv path/to/assessments.csv --dry-run
+ *   node scripts/migrate-assessment-tuples.mjs --csv path/to/assessments.csv --model-id <authorization-model-id>
  */
 
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 import axios from "axios";
+import { parse } from "csv-parse/sync";
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -71,49 +71,57 @@ function loadEnv(envPath) {
 }
 
 // ---------------------------------------------------------------------------
-// CSV reader – streams line-by-line to keep memory low
+// CSV reader (RFC 4180: quoted fields, commas, newlines inside quotes)
 // ---------------------------------------------------------------------------
 
-async function readCsv(filePath) {
-  const rows = [];
-  const rl = readline.createInterface({
-    input: fs.createReadStream(filePath, "utf-8"),
-    crlfDelay: Infinity,
+function readCsv(filePath) {
+  const content = fs.readFileSync(filePath, "utf-8");
+  return parse(content, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+    bom: true,
   });
+}
 
-  let headers = null;
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const cols = trimmed.split(",").map((c) => c.trim());
-    if (!headers) {
-      headers = cols;
-      continue;
-    }
-    const row = {};
-    for (let i = 0; i < headers.length; i++) {
-      row[headers[i]] = cols[i];
-    }
-    rows.push(row);
-  }
-
-  return rows;
+/** OpenFGA rejects TupleKey user/object if not ^[^\s]{2,256}$ */
+function isValidOpenFgaTupleSegment(s) {
+  return typeof s === "string" && /^[^\s]{2,256}$/.test(s);
 }
 
 // ---------------------------------------------------------------------------
-// Map a CSV row to an OpenFGA tuple (or null to skip)
+// Map a CSV row to two OpenFGA tuples (or [] if required ids missing)
 // ---------------------------------------------------------------------------
 
-function rowToTuple(row) {
-  const isActive = row.is_active?.toUpperCase() === "TRUE";
-  if (!isActive) return null;
+function rowToAssessmentTuples(row) {
+  const id = row.id?.trim();
+  const templateId = row.template_id?.trim();
+  const institutionId = row.institution_id?.trim();
+  if (!id || !templateId || !institutionId) return [];
 
-  const isAdmin = row.admin?.toUpperCase() === "TRUE";
-  return {
-    user: `user:${row.id}`,
-    relation: isAdmin ? "admin" : "member",
-    object: `institution:${row.institution_id}`,
-  };
+  const userTemplate = `assessment_template:${templateId}`;
+  const userInstitution = `institution:${institutionId}`;
+  const objectAssessment = `assessment:${id}`;
+  if (
+    !isValidOpenFgaTupleSegment(userTemplate) ||
+    !isValidOpenFgaTupleSegment(userInstitution) ||
+    !isValidOpenFgaTupleSegment(objectAssessment)
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      user: userTemplate,
+      relation: "parent_template",
+      object: objectAssessment,
+    },
+    {
+      user: userInstitution,
+      relation: "parent_institution",
+      object: objectAssessment,
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +148,10 @@ async function writeBatches(api, storeId, modelId, tuples, batchSize) {
     const batch = batches[i];
     try {
       await api.post(`/stores/${storeId}/write`, {
-        writes: { tuple_keys: batch },
+        writes: {
+          tuple_keys: batch,
+          on_duplicate: "ignore",
+        },
         authorization_model_id: modelId,
       });
       written += batch.length;
@@ -176,7 +187,9 @@ async function main() {
     process.exit(1);
   }
   if (!args.modelId && !args.dryRun) {
-    console.error("Error: --model-id <id> is required (unless using --dry-run)");
+    console.error(
+      "Error: --model-id <id> is required (unless using --dry-run)"
+    );
     process.exit(1);
   }
 
@@ -200,8 +213,6 @@ async function main() {
     process.exit(1);
   }
 
-  // --- Read & transform CSV ---------------------------------------------------
-
   const csvPath = path.resolve(args.csv);
   if (!fs.existsSync(csvPath)) {
     console.error(`Error: CSV file not found: ${csvPath}`);
@@ -209,20 +220,36 @@ async function main() {
   }
 
   console.log(`Reading CSV: ${csvPath}`);
-  const rows = await readCsv(csvPath);
+  const rows = readCsv(csvPath);
   console.log(`  Total rows in CSV: ${rows.length}`);
 
-  const tuples = rows.map(rowToTuple).filter(Boolean);
-  const skipped = rows.length - tuples.length;
-  const admins = tuples.filter((t) => t.relation === "admin").length;
-  const members = tuples.filter((t) => t.relation === "member").length;
+  const tuples = rows.flatMap(rowToAssessmentTuples);
+  const completeRows = rows.filter((row) => {
+    const id = row.id?.trim();
+    const templateId = row.template_id?.trim();
+    const institutionId = row.institution_id?.trim();
+    return Boolean(id && templateId && institutionId);
+  });
+  const skipped = rows.length - completeRows.length;
+  const skippedInvalidFormat =
+    completeRows.length - tuples.length / 2;
 
-  console.log(`  Active rows  : ${tuples.length}`);
-  console.log(`  Skipped (inactive): ${skipped}`);
-  console.log(`  Admin tuples : ${admins}`);
-  console.log(`  Member tuples: ${members}`);
+  const parentTemplate = tuples.filter((t) => t.relation === "parent_template")
+    .length;
+  const parentInstitution = tuples.filter(
+    (t) => t.relation === "parent_institution"
+  ).length;
 
-  // --- Dry-run ----------------------------------------------------------------
+  console.log(`  Complete rows (all ids present): ${completeRows.length}`);
+  console.log(`  Skipped (missing id, template_id, or institution_id): ${skipped}`);
+  if (skippedInvalidFormat > 0) {
+    console.log(
+      `  Skipped (ids fail OpenFGA tuple string rules): ${skippedInvalidFormat}`
+    );
+  }
+  console.log(`  parent_template tuples     : ${parentTemplate}`);
+  console.log(`  parent_institution tuples  : ${parentInstitution}`);
+  console.log(`  Total tuples               : ${tuples.length}`);
 
   if (args.dryRun) {
     console.log("\n--- DRY RUN (first 20 tuples) ---");
@@ -235,8 +262,6 @@ async function main() {
     console.log("\nNo tuples were written. Remove --dry-run to execute.");
     return;
   }
-
-  // --- Write ------------------------------------------------------------------
 
   const api = axios.create({
     baseURL: apiUrl,
@@ -259,7 +284,7 @@ async function main() {
   console.log(`\nDone. ${written} tuples written successfully.`);
   if (failures.length > 0) {
     console.error(`${failures.length} batch(es) failed.`);
-    const failPath = path.resolve("migration-failures.json");
+    const failPath = path.resolve("migration-assessment-failures.json");
     fs.writeFileSync(failPath, JSON.stringify(failures, null, 2));
     console.error(`Failed batches saved to ${failPath}`);
   }

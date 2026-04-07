@@ -130,3 +130,6 @@ dist
 .pnp.*
 .DS_Store
 package-lock.json
+
+scripts/data/
+.env.prod

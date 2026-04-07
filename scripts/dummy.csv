@@ -1,0 +1,2 @@
+id,template_id,institution_id,entity_id,workflow_instance_id,created_at,status_id,outcome_id,error_type,error_message,error_details,error_step,workflow_state,latest_workflow_instance_version
+a93598b4-8211-4863-a680-fc1d9a338103,1097b43b-da43-486d-bcad-a2231bf062e1,ff24d87d-b575-4e18-91c3-86f726c252b4,019aa093-cf23-7e83-ae9d-593c8643d852,f70338ce-e536-4f7f-a40a-d9868e587278,2025-11-20 09:29:41.505053+00,,1d04fa2d-ca15-4ea9-83c5-084ee606a8ce,,,,,active,
