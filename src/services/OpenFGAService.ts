@@ -83,7 +83,38 @@ export class OpenFGAService {
 
   static async listTuples(storeId: string, options?: { page_size?: number; continuation_token?: string }): Promise<{ tuples: RelationshipTuple[]; continuation_token?: string }> {
     try {
-      const requestBody: { page_size?: number; continuation_token?: string } = {};
+      return await this.readFiltered(storeId, {
+        page_size: options?.page_size,
+        continuation_token: options?.continuation_token,
+      });
+    } catch (error) {
+      console.error('Failed to list tuples:', error);
+      return { tuples: [], continuation_token: undefined };
+    }
+  }
+
+  static async readFiltered(
+    storeId: string,
+    options?: {
+      user?: string;
+      relation?: string;
+      object?: string;
+      page_size?: number;
+      continuation_token?: string;
+    }
+  ): Promise<{ tuples: RelationshipTuple[]; continuation_token?: string }> {
+    try {
+      const tupleKey: { user?: string; relation?: string; object?: string } = {};
+      if (options?.user) tupleKey.user = options.user;
+      if (options?.relation) tupleKey.relation = options.relation;
+      if (options?.object) tupleKey.object = options.object;
+
+      const requestBody: {
+        tuple_key?: typeof tupleKey;
+        page_size?: number;
+        continuation_token?: string;
+      } = {};
+      if (Object.keys(tupleKey).length > 0) requestBody.tuple_key = tupleKey;
       if (options?.page_size) requestBody.page_size = options.page_size;
       if (options?.continuation_token) requestBody.continuation_token = options.continuation_token;
 
@@ -94,7 +125,6 @@ export class OpenFGAService {
         }
       });
 
-      // Transform the response to match our RelationshipTuple interface
       interface TupleResponse {
         key: {
           user: string;
@@ -108,7 +138,6 @@ export class OpenFGAService {
         timestamp: string;
       }
 
-      // Sort tuples by timestamp in descending order (latest first)
       const sortedTuples = [...(response.data.tuples || [])].sort((a: TupleResponse, b: TupleResponse) => {
         return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
       });
@@ -122,8 +151,51 @@ export class OpenFGAService {
 
       return { tuples, continuation_token: response.data.continuation_token };
     } catch (error) {
-      console.error('Failed to list tuples:', error);
-      return { tuples: [], continuation_token: undefined };
+      console.error('Failed to read tuples:', error);
+      throw error;
+    }
+  }
+
+  static async listObjects(
+    storeId: string,
+    params: {
+      user: string;
+      relation: string;
+      type: string;
+      context?: Record<string, string | number | boolean>;
+      authorizationModelId?: string;
+    }
+  ): Promise<{ objects: string[] }> {
+    try {
+      const body: {
+        user: string;
+        relation: string;
+        type: string;
+        context?: Record<string, string | number | boolean>;
+        authorization_model_id?: string;
+      } = {
+        user: params.user,
+        relation: params.relation,
+        type: params.type,
+      };
+      if (params.context && Object.keys(params.context).length > 0) {
+        body.context = params.context;
+      }
+      if (params.authorizationModelId) {
+        body.authorization_model_id = params.authorizationModelId;
+      }
+
+      const response = await api.post(`/stores/${storeId}/list-objects`, body, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      return { objects: response.data.objects || [] };
+    } catch (error) {
+      console.error('Failed to list objects:', error);
+      throw error;
     }
   }
 

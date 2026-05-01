@@ -19,10 +19,18 @@ import {
   type RelationshipTuple,
 } from "../../utils/tupleHelper";
 
+interface PendingPrefill {
+  user: string;
+  relation: string;
+  object: string;
+}
+
 interface QueryTabProps {
   storeId: string;
   currentModel?: string;
   authModelId: string;
+  pendingPrefill?: PendingPrefill | null;
+  onPrefillConsumed?: () => void;
 }
 
 interface SavedQuery {
@@ -53,6 +61,8 @@ function QueryTab({
   storeId,
   currentModel,
   authModelId,
+  pendingPrefill,
+  onPrefillConsumed,
 }: QueryTabProps) {
   const [metadata, setMetadata] = useState<RelationshipMetadata>();
   const [queryMode, setQueryMode] = useState<"form" | "text">("form");
@@ -66,6 +76,9 @@ function QueryTab({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [conditionState, setConditionState] = useState<ConditionState | null>(
+    null
+  );
+  const [pendingRelationName, setPendingRelationName] = useState<string | null>(
     null
   );
   const [snackbar, setSnackbar] = useState<{
@@ -143,6 +156,51 @@ function QueryTab({
       }
     }
   }, [storeId]);
+
+  useEffect(() => {
+    if (!pendingPrefill) return;
+    const { user, relation, object } = pendingPrefill;
+
+    setQueryMode("form");
+    setError(null);
+    setConditionState(null);
+
+    const userColon = user.indexOf(":");
+    const userHash = user.indexOf("#");
+    if (userColon === -1 || userHash !== -1) {
+      setSelectedType("");
+      setUser(user);
+    } else {
+      setSelectedType(user.slice(0, userColon));
+      setUser(user.slice(userColon + 1));
+    }
+
+    const objectColon = object.indexOf(":");
+    if (objectColon === -1) {
+      setSelectedObjectType("");
+      setObject(object);
+    } else {
+      setSelectedObjectType(object.slice(0, objectColon));
+      setObject(object.slice(objectColon + 1));
+    }
+
+    setPendingRelationName(relation);
+    onPrefillConsumed?.();
+  }, [pendingPrefill, onPrefillConsumed]);
+
+  useEffect(() => {
+    if (!pendingRelationName) return;
+    if (availableRelations.length === 0) return;
+    const match = availableRelations.find(
+      (r) => r.label === pendingRelationName
+    );
+    if (match) {
+      setRelation(match);
+    } else {
+      setRelation({ label: pendingRelationName });
+    }
+    setPendingRelationName(null);
+  }, [pendingRelationName, availableRelations]);
 
   const formatQueryAsText = (query: RelationshipTuple): string => {
     let text = `Can ${query.user} access ${query.object} as ${query.relation}`;

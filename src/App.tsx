@@ -1,13 +1,18 @@
-import { useState, useMemo, Suspense, lazy } from 'react';
+import { useState, useMemo, useCallback, Suspense, lazy } from 'react';
 import { Box, CssBaseline, ThemeProvider, createTheme, Tabs, Tab } from '@mui/material';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import { OpenFGAService } from './services/OpenFGAService';
 import { TokenProvider } from './contexts/TokenContext';
+import type { PendingQueryPrefill } from './components/LookupTab/types';
 import './App.css';
 
 const AuthModelTab = lazy(() => import('./components/AuthModelTab/AuthModelTab'));
 const TuplesTab = lazy(() => import('./components/TuplesTab/TuplesTab'));
 const QueryTab = lazy(() => import('./components/QueryTab/QueryTab'));
+const LookupTab = lazy(() => import('./components/LookupTab/LookupTab'));
+
+const QUERY_TAB_INDEX = 2;
+const LOOKUP_TAB_INDEX = 3;
 
 function App() {
   const [activeTab, setActiveTab] = useState(0);
@@ -16,6 +21,8 @@ function App() {
   const [mode, setMode] = useState<'light' | 'dark'>('dark');
   const [authModel, setAuthModel] = useState('');
   const [authModelId, setAuthModelId] = useState('');
+  const [pendingQueryPrefill, setPendingQueryPrefill] =
+    useState<PendingQueryPrefill | null>(null);
 
   const theme = useMemo(
     () =>
@@ -48,6 +55,18 @@ function App() {
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setActiveTab(newValue);
   };
+
+  const handleCheckTupleInQueryTab = useCallback(
+    (prefill: PendingQueryPrefill) => {
+      setPendingQueryPrefill(prefill);
+      setActiveTab(QUERY_TAB_INDEX);
+    },
+    []
+  );
+
+  const handleQueryPrefillConsumed = useCallback(() => {
+    setPendingQueryPrefill(null);
+  }, []);
 
   return (
     <TokenProvider>
@@ -82,6 +101,7 @@ function App() {
                   <Tab label="Authorization Model" />
                   <Tab label="Tuples" />
                   <Tab label="Query" />
+                  <Tab label="Lookup" />
                 </Tabs>
               </Box>
 
@@ -114,15 +134,26 @@ function App() {
                         authModelId={authModelId}
                       />
                     </Suspense>
-                  ) : (
+                  ) : activeTab === QUERY_TAB_INDEX ? (
                     <Suspense fallback={<div>Loading...</div>}>
                       <QueryTab
                         storeId={selectedStoreId}
                         currentModel={authModel}
                         authModelId={authModelId}
+                        pendingPrefill={pendingQueryPrefill}
+                        onPrefillConsumed={handleQueryPrefillConsumed}
                       />
                     </Suspense>
-                  )}
+                  ) : activeTab === LOOKUP_TAB_INDEX ? (
+                    <Suspense fallback={<div>Loading...</div>}>
+                      <LookupTab
+                        storeId={selectedStoreId}
+                        currentModel={authModel}
+                        authModelId={authModelId}
+                        onCheckTupleInQueryTab={handleCheckTupleInQueryTab}
+                      />
+                    </Suspense>
+                  ) : null}
                 </Box>
               </Box>
             </Box>

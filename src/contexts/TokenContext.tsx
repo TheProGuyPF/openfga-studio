@@ -28,7 +28,7 @@ export function TokenProvider({ children }: { children: ReactNode }) {
   const [tokenStatus, setTokenStatus] = useState<TokenStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const scheduleRefresh = useCallback((intervalMs: number) => {
     clearTimeout(timerRef.current);
