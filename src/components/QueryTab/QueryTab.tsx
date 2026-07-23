@@ -81,6 +81,10 @@ function QueryTab({
   const [pendingRelationName, setPendingRelationName] = useState<string | null>(
     null
   );
+  const [pendingCondition, setPendingCondition] = useState<ConditionState | null>(
+    null
+  );
+  const [conversionWarning, setConversionWarning] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
     message: string;
@@ -126,6 +130,14 @@ function QueryTab({
     setConditionState(null);
   }, [relation]);
 
+  // Apply a pending condition (e.g. from freeform->assisted conversion) after
+  // the reset-on-relation-change effect above has run.
+  useEffect(() => {
+    if (!pendingCondition) return;
+    setConditionState(pendingCondition);
+    setPendingCondition(null);
+  }, [pendingCondition]);
+
   useEffect(() => {
     if (currentModel) {
       try {
@@ -153,9 +165,24 @@ function QueryTab({
         setSavedQueries(JSON.parse(saved));
       } catch (error) {
         console.error("Failed to load saved queries:", error);
+        setSavedQueries([]);
       }
+    } else {
+      setSavedQueries([]);
     }
   }, [storeId]);
+
+  useEffect(() => {
+    if (!storeId) return;
+    try {
+      localStorage.setItem(
+        `queries-${storeId}`,
+        JSON.stringify(savedQueries)
+      );
+    } catch (error) {
+      console.error("Failed to persist saved queries:", error);
+    }
+  }, [savedQueries, storeId]);
 
   useEffect(() => {
     if (!pendingPrefill) return;
@@ -203,22 +230,182 @@ function QueryTab({
   }, [pendingRelationName, availableRelations]);
 
   const formatQueryAsText = (query: RelationshipTuple): string => {
-    let text = `Can ${query.user} access ${query.object} as ${query.relation}`;
+    let text = `is ${query.user} related to ${query.object} as ${query.relation}`;
     if (query.condition) {
       const conditions = Object.entries(query.condition.context)
         .map(([key, value]) => `${key} as ${value}`)
         .join(", ");
       text += ` with ${conditions}`;
     }
-    text += "?";
     return text;
   };
 
-  const handleReplayQuery = (savedQuery: SavedQuery) => {
-    // Switch to text mode and use the saved text format
-    setQueryMode("text");
-    setTextQuery(savedQuery.queryText || formatQueryAsText(savedQuery.query));
+  const parseFreeformQuery = (
+    text: string
+  ): { tuple: RelationshipTuple } | { error: string } => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return { error: "Query is empty" };
+    }
+
+    const nlRegex =
+      /^is\s+(\S+)\s+related\s+to\s+(\S+)\s+as\s+(\S+?)(?:\s+with\s+(.+?))?\s*\??$/i;
+    const match = trimmed.match(nlRegex);
+    if (match) {
+      const [, userPart, objectPart, relationPart, withClause] = match;
+      const tuple: RelationshipTuple = {
+        user: userPart,
+        relation: relationPart,
+        object: objectPart,
+      };
+
+      if (withClause) {
+        const context: Record<string, string | number | boolean> = {};
+        const pairs = withClause
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+        for (const pair of pairs) {
+          const pairMatch = pair.match(/^(\S+)\s+as\s+(.+)$/);
+          if (!pairMatch) {
+            return { error: `Invalid condition syntax: "${pair}"` };
+          }
+          context[pairMatch[1]] = pairMatch[2];
+        }
+
+        const [objectType] = objectPart.split(":");
+        const conditionInfo = metadata?.types
+          .get(objectType)
+          ?.conditions?.get(relationPart);
+        if (!conditionInfo) {
+          return {
+            error: `No condition defined for relation "${relationPart}" on type "${objectType}"`,
+          };
+        }
+        tuple.condition = { name: conditionInfo.name, context };
+      }
+
+      return { tuple };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as RelationshipTuple;
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        typeof parsed.user !== "string" ||
+        typeof parsed.relation !== "string" ||
+        typeof parsed.object !== "string"
+      ) {
+        return {
+          error: "JSON query must include user, relation, and object fields",
+        };
+      }
+      return { tuple: parsed };
+    } catch {
+      return {
+        error:
+          'Invalid query format. Use either "is user related to object as relation" or a valid JSON object.',
+      };
+    }
+  };
+
+  const clearAssistedState = () => {
+    setSelectedType("");
+    setUser("");
+    setSelectedObjectType("");
+    setObject("");
+    setRelation(null);
+    setConditionState(null);
+    setPendingCondition(null);
+    setPendingRelationName(null);
+  };
+
+  // Attempt to populate the Assisted form from the current freeform textQuery.
+  // Returns null on success, or a human-readable failure reason.
+  const tryConvertFreeformToAssisted = (): string | null => {
+    if (!textQuery.trim()) return null;
+
+    const result = parseFreeformQuery(textQuery);
+    if ("error" in result) {
+      return result.error;
+    }
+
+    const { tuple } = result;
+
+    const userColon = tuple.user.indexOf(":");
+    const userHash = tuple.user.indexOf("#");
+    if (userColon === -1 || userHash !== -1) {
+      return `User "${tuple.user}" must be in "type:name" form to use Assisted mode`;
+    }
+    const userType = tuple.user.slice(0, userColon);
+    const userName = tuple.user.slice(userColon + 1);
+
+    const objectColon = tuple.object.indexOf(":");
+    if (objectColon === -1) {
+      return `Object "${tuple.object}" must be in "type:name" form to use Assisted mode`;
+    }
+    const objectType = tuple.object.slice(0, objectColon);
+    const objectName = tuple.object.slice(objectColon + 1);
+
+    if (!metadata) {
+      return "No authorization model is loaded";
+    }
+    if (!metadata.types.has(userType)) {
+      return `User type "${userType}" is not defined in the current model`;
+    }
+    const objectMeta = metadata.types.get(objectType);
+    if (!objectMeta) {
+      return `Object type "${objectType}" is not defined in the current model`;
+    }
+    if (!objectMeta.relations.includes(tuple.relation)) {
+      return `Relation "${tuple.relation}" is not defined on type "${objectType}"`;
+    }
+
+    setSelectedType(userType);
+    setUser(userName);
+    setSelectedObjectType(objectType);
+    setObject(objectName);
+    setRelation({
+      label: tuple.relation,
+      condition: objectMeta.conditions?.get(tuple.relation),
+    });
+
+    if (tuple.condition) {
+      setPendingCondition({
+        name: tuple.condition.name,
+        context: tuple.condition.context,
+      });
+    } else {
+      setPendingCondition(null);
+    }
+
+    return null;
+  };
+
+  const handleModeChange = (newMode: "form" | "text" | null) => {
+    if (!newMode || newMode === queryMode) return;
     setError(null);
+    setConversionWarning(null);
+
+    if (newMode === "form" && queryMode === "text") {
+      const failure = tryConvertFreeformToAssisted();
+      if (failure) {
+        clearAssistedState();
+        setConversionWarning(
+          `Could not convert to Assisted mode: ${failure}`
+        );
+      }
+    }
+
+    setQueryMode(newMode);
+  };
+
+  const handleReplayQuery = (savedQuery: SavedQuery) => {
+    setQueryMode("text");
+    setTextQuery(formatQueryAsText(savedQuery.query));
+    setError(null);
+    setConversionWarning(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -246,23 +433,13 @@ function QueryTab({
           };
         }
       } else {
-        // Natural language query handling
-        const naturalLanguageRegex = /is\s+([^\s]+)\s+related\s+to\s+([^\s]+)\s+as\s+([^\s?]+)/i;
-        const match = textQuery.match(naturalLanguageRegex);
-        
-        if (match) {
-          const [, user, object, relation] = match;
-          query = { user, relation, object };
-        } else {
-          // Not natural language, try JSON
-          try {
-            query = JSON.parse(textQuery);
-          } catch {
-            setError('Invalid query format. Use either "is user related to object as relation" or a valid JSON object.');
-            setIsSubmitting(false);
-            return;
-          }
+        const parseResult = parseFreeformQuery(textQuery);
+        if ("error" in parseResult) {
+          setError(parseResult.error);
+          setIsSubmitting(false);
+          return;
         }
+        query = parseResult.tuple;
       }
 
       const response = await OpenFGAService.check(storeId, query, authModelId);
@@ -275,12 +452,11 @@ function QueryTab({
         severity: result ? "success" : "error"
       });
 
-      // Save query to history with both formats
       const newQuery: SavedQuery = {
         query,
         result: { allowed: result },
         timestamp: Date.now(),
-        queryText: queryMode === "text" ? textQuery : formatQueryAsText(query),
+        queryText: formatQueryAsText(query),
       };
 
       setSavedQueries((prev) => [newQuery, ...prev].slice(0, 10));
@@ -344,7 +520,7 @@ function QueryTab({
             <ToggleButtonGroup
               value={queryMode}
               exclusive
-              onChange={(_, newMode) => newMode && setQueryMode(newMode)}
+              onChange={(_, newMode) => handleModeChange(newMode)}
               size="small"
               sx={{
                 "& .MuiToggleButton-root": {
@@ -392,6 +568,26 @@ function QueryTab({
                 }}
               >
                 {error}
+              </Alert>
+            )}
+
+            {conversionWarning && (
+              <Alert
+                severity="warning"
+                variant="standard"
+                onClose={() => setConversionWarning(null)}
+                sx={{
+                  mb: 2,
+                  backgroundColor: (theme) =>
+                    alpha(theme.palette.warning.main, 0.08),
+                  border: "none",
+                  "& .MuiAlert-icon": {
+                    color: (theme) => theme.palette.warning.main,
+                    opacity: 0.8,
+                  },
+                }}
+              >
+                {conversionWarning}
               </Alert>
             )}
 
@@ -664,7 +860,7 @@ function QueryTab({
                   multiline
                   rows={2}
                   fullWidth
-                  helperText='Format: "is user related to object as relation" or "type:user#relation@object"'
+                  helperText='Format: "is user:anne related to document:readme as viewer" (optionally append "with key as value, ...") or a JSON tuple'
                 />
 
                 <Paper
