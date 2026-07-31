@@ -14,10 +14,26 @@ import {
   Button,
 } from '@mui/material';
 import { useEnvironment } from '../../contexts/EnvironmentContext';
-import { isEnvConfigured, type EnvKey } from '../../environments';
+import {
+  isEnvConfigured,
+  isGuarded,
+  ENV_TIER_STYLE,
+  type Environment,
+  type EnvKey,
+} from '../../environments';
 
-function ProdChip() {
-  return <Chip label="PROD" size="small" color="error" sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />;
+/** Colored criticality chip (blue CANARY / red PROD); nothing for non-prod. */
+function TierChip({ env }: { env: Environment }) {
+  const style = ENV_TIER_STYLE[env.tier];
+  if (!style) return null;
+  return (
+    <Chip
+      label={style.chipLabel}
+      size="small"
+      color={style.color}
+      sx={{ height: 18, fontSize: 10, fontWeight: 700 }}
+    />
+  );
 }
 
 export function EnvSelect() {
@@ -29,7 +45,7 @@ export function EnvSelect() {
     const target = environments.find((e) => e.key === key);
     if (!target) return;
     // Guarded (prod / canary) envs require explicit confirmation before switching in.
-    if (target.guarded) {
+    if (isGuarded(target)) {
       setPendingKey(key);
     } else {
       switchEnv(key);
@@ -37,6 +53,7 @@ export function EnvSelect() {
   };
 
   const pendingEnv = environments.find((e) => e.key === pendingKey) ?? null;
+  const pendingColor = pendingEnv ? ENV_TIER_STYLE[pendingEnv.tier]?.color ?? 'error' : 'error';
 
   return (
     <>
@@ -49,7 +66,7 @@ export function EnvSelect() {
             if (!env) return key;
             return (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                {env.guarded && <ProdChip />}
+                <TierChip env={env} />
                 <span>{env.label}</span>
               </Box>
             );
@@ -60,7 +77,7 @@ export function EnvSelect() {
             return (
               <MenuItem key={env.key} value={env.key} disabled={!configured}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                  {env.guarded && <ProdChip />}
+                  <TierChip env={env} />
                   <span>{env.label}</span>
                   {!configured && (
                     <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
@@ -86,7 +103,7 @@ export function EnvSelect() {
         <DialogActions>
           <Button onClick={() => setPendingKey(null)}>Cancel</Button>
           <Button
-            color="error"
+            color={pendingColor}
             variant="contained"
             onClick={() => {
               if (pendingKey) switchEnv(pendingKey);

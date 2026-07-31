@@ -11,6 +11,12 @@
 
 export type EnvKey = 'npe-xus' | 'can-us' | 'xus' | 'xeu';
 
+/**
+ * Criticality tier. Drives both guard behavior (confirm-on-switch + banner for
+ * anything above `nonprod`) and the visual style (see ENV_TIER_STYLE).
+ */
+export type EnvTier = 'nonprod' | 'canary' | 'prod';
+
 export interface Environment {
   key: EnvKey;
   label: string;
@@ -22,8 +28,20 @@ export interface Environment {
   tokenServiceAudience: string;
   /** Same-origin proxy route; the proxy injects the X2S Basic auth for this env. */
   tokenServiceRoute: string;
-  /** Production-style guarding: persistent banner + confirm-on-switch. */
-  guarded: boolean;
+  /** Criticality tier — determines guarding and chip/banner color. */
+  tier: EnvTier;
+}
+
+/** Chip label + MUI palette color per tier. `nonprod` gets no chip/banner. */
+export const ENV_TIER_STYLE: Record<EnvTier, { chipLabel: string; color: 'error' | 'info' } | null> = {
+  nonprod: null,
+  canary: { chipLabel: 'CANARY', color: 'info' }, // MUI 'info' = blue
+  prod: { chipLabel: 'PROD', color: 'error' }, // MUI 'error' = red
+};
+
+/** Guarded envs (canary + prod) get a persistent banner and confirm-on-switch. */
+export function isGuarded(env: Environment): boolean {
+  return env.tier !== 'nonprod';
 }
 
 const env = import.meta.env;
@@ -37,7 +55,7 @@ export const environments: Record<EnvKey, Environment> = {
     storeId: env.VITE_OPENFGA_STORE_ID_NPE_XUS || '',
     tokenServiceAudience: env.VITE_TOKEN_SERVICE_AUDIENCE_NPE_XUS || 'openfga-mx',
     tokenServiceRoute: '/token-service/npe-xus',
-    guarded: false,
+    tier: 'nonprod',
   },
   'can-us': {
     key: 'can-us',
@@ -46,7 +64,7 @@ export const environments: Record<EnvKey, Environment> = {
     storeId: env.VITE_OPENFGA_STORE_ID_CAN_US || '',
     tokenServiceAudience: env.VITE_TOKEN_SERVICE_AUDIENCE_CAN_US || '',
     tokenServiceRoute: '/token-service/can-us',
-    guarded: true,
+    tier: 'canary',
   },
   xus: {
     key: 'xus',
@@ -55,7 +73,7 @@ export const environments: Record<EnvKey, Environment> = {
     storeId: env.VITE_OPENFGA_STORE_ID_XUS || '',
     tokenServiceAudience: env.VITE_TOKEN_SERVICE_AUDIENCE_XUS || '',
     tokenServiceRoute: '/token-service/xus',
-    guarded: true,
+    tier: 'prod',
   },
   xeu: {
     key: 'xeu',
@@ -64,7 +82,7 @@ export const environments: Record<EnvKey, Environment> = {
     storeId: env.VITE_OPENFGA_STORE_ID_XEU || '',
     tokenServiceAudience: env.VITE_TOKEN_SERVICE_AUDIENCE_XEU || '',
     tokenServiceRoute: '/token-service/xeu',
-    guarded: true,
+    tier: 'prod',
   },
 };
 
