@@ -1,24 +1,62 @@
 // OpenFGA API service
 import axios from 'axios';
 import { dslToJson, jsonToDsl } from '../utils/modelConverter';
-import { config } from '../config';
 import { getApiToken } from './tokenStore';
+import { isTokenServiceConfigured, refreshToken, getInFlight } from './TokenService';
+import { getCurrentEnvironment } from './environmentStore';
 
 const api = axios.create({
-  baseURL: config.apiUrl || '/api',
   headers: {
     'Accept': 'application/json',
     'Content-Type': 'application/json',
   },
 });
 
-api.interceptors.request.use((reqConfig) => {
+api.interceptors.request.use(async (reqConfig) => {
+  // Target the active environment's OpenFGA API. Set per-request (not at
+  // axios.create) so switching environments at runtime takes effect immediately.
+  reqConfig.baseURL = getCurrentEnvironment().apiUrl || '/api';
+
+  // Gate startup requests: when the token service is configured but no token has
+  // been fetched yet (or one is mid-flight), wait for it so the first requests
+  // never go out unauthenticated and 401.
+  if (isTokenServiceConfigured() && !getApiToken()) {
+    try {
+      await (getInFlight() ?? refreshToken());
+    } catch {
+      // Fall through unauthenticated; the response interceptor will surface the error.
+    }
+  }
   const token = getApiToken();
   if (token) {
     reqConfig.headers.Authorization = `Bearer ${token}`;
   }
   return reqConfig;
 });
+
+// Reactive recovery: on a 401 (e.g. hourly expiry), fetch a fresh token once and
+// retry the original request. Single-flight refresh dedupes concurrent 401s.
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config;
+    if (
+      error.response?.status === 401 &&
+      isTokenServiceConfigured() &&
+      original &&
+      !original._retry
+    ) {
+      original._retry = true;
+      try {
+        await refreshToken();
+      } catch {
+        return Promise.reject(error);
+      }
+      return api(original);
+    }
+    return Promise.reject(error);
+  },
+);
 
 interface RelationshipTuple {
   user: string;

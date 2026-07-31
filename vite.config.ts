@@ -17,13 +17,29 @@ export default defineConfig(({ mode }) => {
     },
   };
 
-  if (env.VITE_TOKEN_SERVICE_URL) {
-    const url = new URL(env.VITE_TOKEN_SERVICE_URL);
-    proxy["/token-service"] = {
-      target: url.origin,
-      changeOrigin: true,
-      rewrite: (path: string) => path.replace(/^\/token-service/, url.pathname),
-    };
+  // Per-environment token-service routes. The X2S minting credential is read
+  // from NON-VITE env vars (never inlined into the client bundle) and injected
+  // as the Basic auth header server-side, so it never reaches the browser.
+  const ENVS: { key: string; suffix: string }[] = [
+    { key: "npe-xus", suffix: "NPE_XUS" },
+    { key: "can-us", suffix: "CAN_US" },
+    { key: "xus", suffix: "XUS" },
+    { key: "xeu", suffix: "XEU" },
+  ];
+  for (const { key, suffix } of ENVS) {
+    const upstream = env[`TOKEN_SERVICE_URL_${suffix}`];
+    const x2s = env[`FGA_X2S_TOKEN_${suffix}`];
+    if (upstream && x2s) {
+      const url = new URL(upstream);
+      proxy[`/token-service/${key}`] = {
+        target: url.origin,
+        changeOrigin: true,
+        rewrite: () => url.pathname,
+        headers: {
+          Authorization: `Basic ${x2s}`,
+        },
+      };
+    }
   }
 
   return {

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
-import { isTokenServiceConfigured, fetchApiToken } from '../services/TokenService';
+import { isTokenServiceConfigured, refreshToken } from '../services/TokenService';
 
 type TokenStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -34,7 +34,7 @@ export function TokenProvider({ children }: { children: ReactNode }) {
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
       try {
-        const result = await fetchApiToken();
+        const result = await refreshToken();
         setTokenStatus('success');
         setError(null);
         setLastRefreshedAt(Date.now());
@@ -52,7 +52,7 @@ export function TokenProvider({ children }: { children: ReactNode }) {
     setTokenStatus('loading');
     setError(null);
     try {
-      const result = await fetchApiToken();
+      const result = await refreshToken();
       setTokenStatus('success');
       setLastRefreshedAt(Date.now());
       clearTimeout(timerRef.current);
@@ -71,7 +71,7 @@ export function TokenProvider({ children }: { children: ReactNode }) {
     async function initialFetch() {
       setTokenStatus('loading');
       try {
-        const result = await fetchApiToken();
+        const result = await refreshToken();
         if (cancelled) return;
         setTokenStatus('success');
         setLastRefreshedAt(Date.now());

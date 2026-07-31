@@ -15,6 +15,7 @@ import {
   Typography
 } from '@mui/material';
 import { OpenFGAService } from '../../services/OpenFGAService';
+import { useEnvironment } from '../../contexts/EnvironmentContext';
 
 interface Store {
   id: string;
@@ -27,6 +28,7 @@ interface StoreSelectProps {
 }
 
 export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) => {
+  const { environment } = useEnvironment();
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +43,14 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
       const storesList = await OpenFGAService.listStores();
       setStores(storesList);
 
-      // If we have stores but none selected, select the first one
+      // If we have stores but none selected, prefer this env's configured
+      // default store, otherwise fall back to the first one.
       if (storesList.length > 0 && !selectedStore) {
-        onStoreChange(storesList[0].id, storesList[0].name);
+        const preferred = environment.storeId
+          ? storesList.find((s) => s.id === environment.storeId)
+          : undefined;
+        const pick = preferred ?? storesList[0];
+        onStoreChange(pick.id, pick.name);
       }
     } catch (error) {
       console.error('Failed to load stores:', error);
@@ -52,7 +59,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
     } finally {
       setLoading(false);
     }
-  }, [selectedStore, onStoreChange]);
+  }, [selectedStore, onStoreChange, environment.storeId]);
 
   useEffect(() => {
     loadStores();

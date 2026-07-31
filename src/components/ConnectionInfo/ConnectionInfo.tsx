@@ -1,4 +1,4 @@
-import { useState, useCallback, MouseEvent } from 'react';
+import { useState, useCallback, type MouseEvent } from 'react';
 import {
   IconButton,
   Popover,
@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { config } from '../../config';
+import { useEnvironment } from '../../contexts/EnvironmentContext';
 
 interface ConnectionInfoProps {
   storeId: string;
@@ -66,6 +66,7 @@ function InfoRow({ label, value }: InfoRowProps) {
 }
 
 export const ConnectionInfo = ({ storeId, storeName, authModelId }: ConnectionInfoProps) => {
+  const { environment } = useEnvironment();
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
 
   const handleOpen = (event: MouseEvent<HTMLButtonElement>) => {
@@ -98,7 +99,8 @@ export const ConnectionInfo = ({ storeId, storeName, authModelId }: ConnectionIn
         }}
       >
         <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Connection Details</Typography>
-        <InfoRow label="API URL" value={config.apiUrl} />
+        <InfoRow label="Environment" value={environment.label} />
+        <InfoRow label="API URL" value={environment.apiUrl} />
         <InfoRow label="Store Name" value={storeName} />
         <InfoRow label="Store ID" value={storeId} />
         <InfoRow label="Authorization Model ID" value={authModelId} />
