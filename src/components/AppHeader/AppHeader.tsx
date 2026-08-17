@@ -6,6 +6,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import { StoreSelect } from '../StoreSelect/StoreSelect';
 import { ConnectionInfo } from '../ConnectionInfo/ConnectionInfo';
+import { EnvSelect } from '../EnvSelect/EnvSelect';
 import { useToken } from '../../contexts/TokenContext';
 
 interface AppHeaderProps {
@@ -42,9 +43,12 @@ export const AppHeader = ({ selectedStore, storeName, authModelId, onStoreChange
         <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
           <img src="/openfga.svg" alt="OpenFGA Logo" style={{ height: 32, marginRight: 8 }} />
         </Box>
-        <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 4 }}>
+        <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 3 }}>
           OpenFGA Studio
         </Typography>
+        <Box sx={{ mr: 2 }}>
+          <EnvSelect />
+        </Box>
         <Box sx={{ flexGrow: 1 }}>
           <StoreSelect
             selectedStore={selectedStore}

@@ -1,8 +1,10 @@
 import { useState, useMemo, useCallback, Suspense, lazy } from 'react';
 import { Box, CssBaseline, ThemeProvider, createTheme, Tabs, Tab } from '@mui/material';
 import { AppHeader } from './components/AppHeader/AppHeader';
+import { ProdBanner } from './components/EnvSelect/ProdBanner';
 import { OpenFGAService } from './services/OpenFGAService';
 import { TokenProvider } from './contexts/TokenContext';
+import { EnvironmentProvider, useEnvironment } from './contexts/EnvironmentContext';
 import type { PendingQueryPrefill } from './components/LookupTab/types';
 import './App.css';
 
@@ -15,14 +17,7 @@ const QUERY_TAB_INDEX = 2;
 const LOOKUP_TAB_INDEX = 3;
 
 function App() {
-  const [activeTab, setActiveTab] = useState(0);
-  const [selectedStoreId, setSelectedStoreId] = useState('');
-  const [selectedStoreName, setSelectedStoreName] = useState('');
   const [mode, setMode] = useState<'light' | 'dark'>('dark');
-  const [authModel, setAuthModel] = useState('');
-  const [authModelId, setAuthModelId] = useState('');
-  const [pendingQueryPrefill, setPendingQueryPrefill] =
-    useState<PendingQueryPrefill | null>(null);
 
   const theme = useMemo(
     () =>
@@ -37,6 +32,50 @@ function App() {
       }),
     [mode]
   );
+
+  const toggleTheme = useCallback(
+    () => setMode((m) => (m === 'light' ? 'dark' : 'light')),
+    []
+  );
+
+  return (
+    <EnvironmentProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <AppShell onToggleTheme={toggleTheme} />
+      </ThemeProvider>
+    </EnvironmentProvider>
+  );
+}
+
+// Reads the active environment and remounts the whole workspace when it changes
+// (via `key`), which resets store/model/tuple/query state and re-fetches the
+// token for the new env. The prod banner sits above the remount boundary.
+function AppShell({ onToggleTheme }: { onToggleTheme: () => void }) {
+  const { currentEnvKey } = useEnvironment();
+  return (
+    <Box sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100vh',
+      bgcolor: 'background.default',
+      color: 'text.primary',
+      overflow: 'hidden'
+    }}>
+      <ProdBanner />
+      <Workspace key={currentEnvKey} onToggleTheme={onToggleTheme} />
+    </Box>
+  );
+}
+
+function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
+  const [activeTab, setActiveTab] = useState(0);
+  const [selectedStoreId, setSelectedStoreId] = useState('');
+  const [selectedStoreName, setSelectedStoreName] = useState('');
+  const [authModel, setAuthModel] = useState('');
+  const [authModelId, setAuthModelId] = useState('');
+  const [pendingQueryPrefill, setPendingQueryPrefill] =
+    useState<PendingQueryPrefill | null>(null);
 
   const handleStoreChange = async (storeId: string, storeName: string) => {
     setSelectedStoreId(storeId);
@@ -70,24 +109,14 @@ function App() {
 
   return (
     <TokenProvider>
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        height: '100vh',
-        bgcolor: 'background.default',
-        color: 'text.primary',
-        overflow: 'hidden'
-      }}>
         <AppHeader
           selectedStore={selectedStoreId}
           storeName={selectedStoreName}
           authModelId={authModelId}
           onStoreChange={handleStoreChange}
-          onToggleTheme={() => setMode(mode === 'light' ? 'dark' : 'light')}
+          onToggleTheme={onToggleTheme}
         />
-        
+
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {selectedStoreId && (
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -159,8 +188,6 @@ function App() {
             </Box>
           )}
         </Box>
-      </Box>
-    </ThemeProvider>
     </TokenProvider>
   );
 }

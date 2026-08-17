@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { config } from '../config';
 import { setApiToken } from './tokenStore';
+import { getCurrentEnvironment } from './environmentStore';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 3600 * 1000; // 1 hour
 const REFRESH_MARGIN_MS = 60 * 1000; // refresh 1 min before expiry
@@ -17,22 +17,22 @@ export interface TokenResponse {
 }
 
 export function isTokenServiceConfigured(): boolean {
-  return !!(config.tokenServiceUrl && config.x2sToken);
+  // Every environment authenticates via the token service; the client only
+  // needs a proxy route (the proxy injects the X2S Basic auth server-side).
+  return !!getCurrentEnvironment().tokenServiceRoute;
 }
 
 export async function fetchApiToken(): Promise<TokenResponse> {
-  if (!isTokenServiceConfigured()) {
-    throw new Error('Token service is not configured');
+  const env = getCurrentEnvironment();
+  if (!env.tokenServiceRoute) {
+    throw new Error('Token service is not configured for the current environment');
   }
 
+  // No Authorization header here — the proxy injects `Basic <x2s>` for this env
+  // so the minting credential never reaches the browser.
   const response = await tokenApi.post(
-    '/token-service',
-    { audience: config.tokenServiceAudience },
-    {
-      headers: {
-        Authorization: `Basic ${config.x2sToken}`,
-      },
-    },
+    env.tokenServiceRoute,
+    { audience: env.tokenServiceAudience },
   );
 
   const data = response.data;
@@ -50,4 +50,22 @@ export async function fetchApiToken(): Promise<TokenResponse> {
   }
 
   return { token, refreshIntervalMs };
+}
+
+// Single-flight refresh: concurrent callers (startup burst, parallel 401 retries)
+// share one in-flight fetch instead of stampeding the token service.
+let inFlight: Promise<TokenResponse> | null = null;
+
+export function getInFlight(): Promise<TokenResponse> | null {
+  return inFlight;
+}
+
+export function refreshToken(): Promise<TokenResponse> {
+  if (inFlight) {
+    return inFlight;
+  }
+  inFlight = fetchApiToken().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
 }

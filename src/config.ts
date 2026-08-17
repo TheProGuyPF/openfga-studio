@@ -1,13 +1,10 @@
+// Global, environment-independent config. Per-environment values (OpenFGA URL,
+// token-service route/audience, default store) now live in `environments.ts`
+// and are read via `environmentStore`. `apiToken` is retained only as an
+// optional, env-agnostic manual override (lowest priority in tokenStore).
 export const config = {
-  apiUrl:
-    import.meta.env.VITE_OPENFGA_API_URL ||
-    "https://api.playground-us1.fga.dev",
   apiVersion: "v1",
-  storeId: import.meta.env.VITE_OPENFGA_STORE_ID || "",
   apiToken: import.meta.env.VITE_OPENFGA_API_TOKEN || "",
-  tokenServiceUrl: import.meta.env.VITE_TOKEN_SERVICE_URL || "",
-  tokenServiceAudience: import.meta.env.VITE_TOKEN_SERVICE_AUDIENCE || "",
-  x2sToken: import.meta.env.VITE_FGA_X2S_TOKEN || "",
   defaultAuthorizationModel: `model
   schema 1.1
 

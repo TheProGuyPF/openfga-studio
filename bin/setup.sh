@@ -172,31 +172,40 @@ EOF
 fi
 export OPENFGA_GRPC_BLOCK
 
-# Token-service reverse proxy (optional)
-TOKEN_SERVICE_URL=${TOKEN_SERVICE_URL:-}
+# Per-environment token-service reverse proxies.
+# Each env's X2S minting credential is injected server-side as the Basic auth
+# header so it never reaches the browser. Values come from container env vars
+# TOKEN_SERVICE_URL_<ENV> / FGA_X2S_TOKEN_<ENV>. The rendered nginx.conf holds
+# the secrets only inside the running container (never committed, never served).
 TOKEN_SERVICE_BLOCK=''
-if [ -n "${TOKEN_SERVICE_URL}" ]; then
-  TOKEN_SERVICE_BLOCK=$(cat <<EOF
-        location /token-service {
-            proxy_pass ${TOKEN_SERVICE_URL};
+for pair in "npe-xus:NPE_XUS" "can-us:CAN_US" "xus:XUS" "xeu:XEU"; do
+  envkey="${pair%%:*}"
+  suffix="${pair##*:}"
+  eval "svc_url=\${TOKEN_SERVICE_URL_${suffix}:-}"
+  eval "x2s=\${FGA_X2S_TOKEN_${suffix}:-}"
+  if [ -n "${svc_url}" ] && [ -n "${x2s}" ]; then
+    TOKEN_SERVICE_BLOCK="${TOKEN_SERVICE_BLOCK}
+        location /token-service/${envkey} {
+            proxy_pass ${svc_url};
             proxy_http_version 1.1;
             proxy_set_header Host \$host;
+            proxy_set_header Authorization \"Basic ${x2s}\";
             proxy_ssl_server_name on;
             proxy_connect_timeout 5s;
             proxy_read_timeout 15s;
         }
-EOF
-)
-  echo "Token-service proxy configured -> ${TOKEN_SERVICE_URL}"
-fi
+"
+    echo "Token-service proxy configured for ${envkey} -> ${svc_url}"
+  fi
+done
 export TOKEN_SERVICE_BLOCK
 
 # Render templates into place
 if [ -f /etc/nginx/nginx.conf.template ]; then
   envsubst '${OPENFGA_HOST} ${OPENFGA_HTTP_PORT} ${OPENFGA_GRPC_PORT} ${UI_PORT} ${OPENFGA_ENDPOINT} ${OPENFGA_SCHEME} ${OPENFGA_GRPC_SCHEME} ${OPENFGA_GRPC_BLOCK} ${OPENFGA_PATH_PREFIX} ${TOKEN_SERVICE_BLOCK}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
   echo "Rendered /etc/nginx/nginx.conf from template"
-  echo "--- Rendered nginx.conf (first 80 lines) ---"
-  sed -n '1,80p' /etc/nginx/nginx.conf || true
+  echo "--- Rendered nginx.conf (first 80 lines, secrets redacted) ---"
+  sed -n '1,80p' /etc/nginx/nginx.conf | sed -E 's/(Authorization "Basic )[^"]*(")/\1<redacted>\2/' || true
 fi
 
 if [ -f /etc/templates/config.json.template ]; then
@@ -246,8 +255,8 @@ if nginx -t 2>/tmp/nginx-test.log; then
   echo "nginx config test: OK"
 else
   echo "nginx config test: FAILED"
-  echo "--- /etc/nginx/nginx.conf ---"
-  sed -n '1,160p' /etc/nginx/nginx.conf || true
+  echo "--- /etc/nginx/nginx.conf (secrets redacted) ---"
+  sed -n '1,160p' /etc/nginx/nginx.conf | sed -E 's/(Authorization "Basic )[^"]*(")/\1<redacted>\2/' || true
   echo "--- /tmp/nginx-test.log ---"
   sed -n '1,160p' /tmp/nginx-test.log || true
   exit 1
