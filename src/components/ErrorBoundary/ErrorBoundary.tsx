@@ -1,16 +1,28 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { Box, Typography, Button, Paper } from '@mui/material';
+import { Box, Typography, Button, Paper, Stack } from '@mui/material';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 interface Props {
   children: ReactNode;
+  /** Heading shown in the fallback. */
+  title?: string;
+  /** When any value in this array changes, a caught error is cleared (re-render is retried). */
+  resetKeys?: unknown[];
+  /** Called when the boundary resets (via "Try again" or a resetKeys change). */
+  onReset?: () => void;
 }
 
 interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+}
+
+function keysChanged(a?: unknown[], b?: unknown[]): boolean {
+  if (a === b) return false;
+  if (!a || !b || a.length !== b.length) return true;
+  return a.some((v, i) => !Object.is(v, b[i]));
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -36,6 +48,18 @@ export class ErrorBoundary extends Component<Props, State> {
     });
   }
 
+  public componentDidUpdate(prevProps: Props) {
+    // Auto-recover when the surrounding context changes (e.g. tab/store switch).
+    if (this.state.hasError && keysChanged(prevProps.resetKeys, this.props.resetKeys)) {
+      this.reset();
+    }
+  }
+
+  private reset = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null });
+    this.props.onReset?.();
+  };
+
   public render() {
     if (this.state.hasError) {
       return (
@@ -45,6 +69,7 @@ export class ErrorBoundary extends Component<Props, State> {
             justifyContent: 'center',
             alignItems: 'center',
             minHeight: '200px',
+            height: '100%',
             p: 3
           }}
         >
@@ -59,23 +84,22 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             <ErrorOutlineIcon color="error" sx={{ fontSize: 48, mb: 2 }} />
             <Typography variant="h6" color="error" gutterBottom>
-              Something went wrong
+              {this.props.title || 'Something went wrong'}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               {this.state.error?.message || 'An unexpected error occurred'}
             </Typography>
-            <Button
-              variant="contained"
-              onClick={() => {
-                this.setState({ hasError: false, error: null, errorInfo: null });
-                window.location.reload();
-              }}
-            >
-              Reload Page
-            </Button>
-            {process.env.NODE_ENV === 'development' && this.state.errorInfo && (
+            <Stack direction="row" spacing={1} justifyContent="center">
+              <Button variant="contained" onClick={this.reset}>
+                Try again
+              </Button>
+              <Button variant="outlined" onClick={() => window.location.reload()}>
+                Reload page
+              </Button>
+            </Stack>
+            {import.meta.env.DEV && this.state.errorInfo && (
               <Box sx={{ mt: 2, textAlign: 'left' }}>
-                <Typography variant="caption" component="pre" sx={{ 
+                <Typography variant="caption" component="pre" sx={{
                   whiteSpace: 'pre-wrap',
                   overflow: 'auto',
                   maxHeight: '200px',

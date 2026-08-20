@@ -24,6 +24,7 @@ import {
 } from '@mui/material';
 import { OpenFGAService } from '../../services/OpenFGAService';
 import { extractRelationshipMetadata, type RelationshipMetadata, type RelationshipTuple } from '../../utils/tupleHelper';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface TuplesTabProps {
   storeId: string;
@@ -69,6 +70,8 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [mode, setMode] = useState<'assisted' | 'freeform'>('assisted');
   const [loading, setLoading] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<RelationshipTuple | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Pagination state (infinite load more)
   const [pageSize, setPageSize] = useState<number>(10);
@@ -262,6 +265,33 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
+    const tuple = pendingDelete;
+    try {
+      setDeleting(true);
+      await OpenFGAService.deleteTuple(storeId, tuple, authModelId);
+      // Optimistically remove the row, preserving the current page/position
+      // (previously this reset back to page 1).
+      setTuples((prev) =>
+        prev.filter(
+          (t) =>
+            !(t.user === tuple.user && t.relation === tuple.relation && t.object === tuple.object),
+        ),
+      );
+      setNotification({
+        message: `Successfully deleted tuple: ${tuple.user} ${tuple.relation} ${tuple.object}`,
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Failed to delete tuple:', error);
+      setNotification({ message: 'Failed to delete tuple', type: 'error' });
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
     }
   };
 
@@ -686,28 +716,8 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
                       <Button
                         size="small"
                         color="error"
-                        onClick={async () => {
-                          try {
-                            setLoading(true);
-                            await OpenFGAService.deleteTuple(storeId, tuple, authModelId);
-                            // After delete, reload first page
-                            const response = await OpenFGAService.listTuples(storeId, { page_size: pageSize });
-                            setTuples(response.tuples);
-                            setContinuationToken(response.continuation_token);
-                            setNotification({
-                              message: `Successfully deleted tuple: ${tuple.user} ${tuple.relation} ${tuple.object}`,
-                              type: 'success'
-                            });
-                          } catch (error) {
-                            console.error('Failed to delete tuple:', error);
-                            setNotification({
-                              message: 'Failed to delete tuple',
-                              type: 'error'
-                            });
-                          } finally {
-                            setLoading(false);
-                          }
-                        }}
+                        disabled={deleting}
+                        onClick={() => setPendingDelete(tuple)}
                       >
                         Delete
                       </Button>
@@ -767,6 +777,20 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
             {notification?.message}
           </Alert>
         </Snackbar>
+
+        <ConfirmDialog
+          open={!!pendingDelete}
+          title="Delete tuple?"
+          message={
+            pendingDelete
+              ? `This permanently removes the tuple: ${pendingDelete.user} · ${pendingDelete.relation} · ${pendingDelete.object}`
+              : ''
+          }
+          confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+          confirmColor="error"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
       </Box>
     </Box>
   );

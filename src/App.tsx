@@ -6,6 +6,7 @@ import { ProdBanner } from './components/EnvSelect/ProdBanner';
 import { LatencyDrawer } from './components/LatencyDrawer/LatencyDrawer';
 import { TabLoader } from './components/common/TabLoader';
 import { EmptyState } from './components/common/EmptyState';
+import { ErrorBoundary } from './components/ErrorBoundary/ErrorBoundary';
 import { OpenFGAService } from './services/OpenFGAService';
 import { TokenProvider } from './contexts/TokenContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -174,12 +175,16 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                 width: '100%',
                 overflow: 'hidden'
               }}>
-                <Box sx={{ 
+                <Box sx={{
                   flex: 1,
                   width: '100%',
                   position: 'relative',
                   overflow: 'hidden'
                 }}>
+                  <ErrorBoundary
+                    title="This tab hit an error"
+                    resetKeys={[activeTab, selectedStoreId]}
+                  >
                   {activeTab === 0 ? (
                     <Suspense fallback={<TabLoader />}>
                       <AuthModelTab 
@@ -225,6 +230,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                       />
                     </Suspense>
                   ) : null}
+                  </ErrorBoundary>
                 </Box>
               </Box>
             </Box>
