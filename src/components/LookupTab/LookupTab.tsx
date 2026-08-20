@@ -9,6 +9,7 @@ import {
   Snackbar,
   IconButton,
   Collapse,
+  Chip,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { OpenFGAService } from '../../services/OpenFGAService';
@@ -16,6 +17,7 @@ import {
   extractRelationshipMetadata,
   type RelationshipMetadata,
 } from '../../utils/tupleHelper';
+import { formatMs } from '../../utils/latencyStats';
 import { EffectiveAccessForm } from './EffectiveAccessForm';
 import { DirectTuplesForm } from './DirectTuplesForm';
 import { LookupResults } from './LookupResults';
@@ -100,6 +102,7 @@ export default function LookupTab({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
+  const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -160,6 +163,7 @@ export default function LookupTab({
           ? effectiveValues.conditionState.context
           : undefined;
 
+      const startedAt = performance.now();
       const { objects } = await OpenFGAService.listObjects(storeId, {
         user: userId,
         relation: effectiveValues.relation,
@@ -167,6 +171,7 @@ export default function LookupTab({
         context,
         authorizationModelId: authModelId || undefined,
       });
+      setLastLatencyMs(performance.now() - startedAt);
 
       setEffectiveResult({
         query: {
@@ -212,10 +217,12 @@ export default function LookupTab({
     setError(null);
     try {
       const filters = buildDirectFilters();
+      const startedAt = performance.now();
       const response = await OpenFGAService.readFiltered(storeId, {
         ...filters,
         page_size: DEFAULT_PAGE_SIZE,
       });
+      setLastLatencyMs(performance.now() - startedAt);
       setDirectResult({
         query: filters,
         tuples: response.tuples,
@@ -479,6 +486,16 @@ export default function LookupTab({
             )}
           </Box>
         </Paper>
+
+        {lastLatencyMs !== null && (
+          <Box sx={{ mb: 1 }}>
+            <Chip
+              size="small"
+              variant="outlined"
+              label={`last request: ${formatMs(lastLatencyMs)}`}
+            />
+          </Box>
+        )}
 
         <LookupResults
           mode={mode}

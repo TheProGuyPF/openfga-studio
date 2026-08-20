@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, Suspense, lazy } from 'react';
 import { Box, CssBaseline, ThemeProvider, createTheme, Tabs, Tab } from '@mui/material';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import { ProdBanner } from './components/EnvSelect/ProdBanner';
+import { LatencyDrawer } from './components/LatencyDrawer/LatencyDrawer';
 import { OpenFGAService } from './services/OpenFGAService';
 import { TokenProvider } from './contexts/TokenContext';
 import { EnvironmentProvider, useEnvironment } from './contexts/EnvironmentContext';
@@ -12,9 +13,11 @@ const AuthModelTab = lazy(() => import('./components/AuthModelTab/AuthModelTab')
 const TuplesTab = lazy(() => import('./components/TuplesTab/TuplesTab'));
 const QueryTab = lazy(() => import('./components/QueryTab/QueryTab'));
 const LookupTab = lazy(() => import('./components/LookupTab/LookupTab'));
+const BenchmarkTab = lazy(() => import('./components/BenchmarkTab/BenchmarkTab'));
 
 const QUERY_TAB_INDEX = 2;
 const LOOKUP_TAB_INDEX = 3;
+const BENCHMARK_TAB_INDEX = 4;
 
 function App() {
   const [mode, setMode] = useState<'light' | 'dark'>('dark');
@@ -64,6 +67,9 @@ function AppShell({ onToggleTheme }: { onToggleTheme: () => void }) {
     }}>
       <ProdBanner />
       <Workspace key={currentEnvKey} onToggleTheme={onToggleTheme} />
+      {/* Passive latency monitor — module-level sample buffer, so it survives the
+          per-env workspace remount and observes calls across all tabs/envs. */}
+      <LatencyDrawer />
     </Box>
   );
 }
@@ -131,6 +137,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                   <Tab label="Tuples" />
                   <Tab label="Query" />
                   <Tab label="Lookup" />
+                  <Tab label="Benchmark" />
                 </Tabs>
               </Box>
 
@@ -180,6 +187,14 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                         currentModel={authModel}
                         authModelId={authModelId}
                         onCheckTupleInQueryTab={handleCheckTupleInQueryTab}
+                      />
+                    </Suspense>
+                  ) : activeTab === BENCHMARK_TAB_INDEX ? (
+                    <Suspense fallback={<div>Loading...</div>}>
+                      <BenchmarkTab
+                        storeId={selectedStoreId}
+                        currentModel={authModel}
+                        authModelId={authModelId}
                       />
                     </Suspense>
                   ) : null}

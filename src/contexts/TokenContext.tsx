@@ -19,6 +19,8 @@ const TokenContext = createContext<TokenContextValue>({
   isConfigured: false,
 });
 
+// Hook co-located with its Provider (idiomatic React); see EnvironmentContext.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToken() {
   return useContext(TokenContext);
 }

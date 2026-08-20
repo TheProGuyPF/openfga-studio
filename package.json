@@ -33,6 +33,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "reactflow": "^11.11.4",
+    "recharts": "^2.15.0",
     "yaml": "^2.8.0"
   },
   "devDependencies": {

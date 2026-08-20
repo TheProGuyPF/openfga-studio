@@ -13,6 +13,9 @@ interface EnvironmentContextValue {
 
 const EnvironmentContext = createContext<EnvironmentContextValue | null>(null);
 
+// The hook is intentionally co-located with its Provider (idiomatic React). This
+// only costs Fast Refresh granularity for this file, which is acceptable here.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useEnvironment(): EnvironmentContextValue {
   const ctx = useContext(EnvironmentContext);
   if (!ctx) {

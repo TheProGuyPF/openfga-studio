@@ -11,6 +11,7 @@ import {
   alpha,
   Alert,
   Snackbar,
+  Chip,
 } from "@mui/material";
 import { OpenFGAService } from "../../services/OpenFGAService";
 import {
@@ -18,6 +19,7 @@ import {
   type RelationshipMetadata,
   type RelationshipTuple,
 } from "../../utils/tupleHelper";
+import { formatMs } from "../../utils/latencyStats";
 
 interface PendingPrefill {
   user: string;
@@ -38,6 +40,8 @@ interface SavedQuery {
   query: RelationshipTuple;
   result: { allowed: boolean };
   queryText?: string;
+  /** Client-observed latency (ms) for this check. */
+  latencyMs?: number;
 }
 
 interface RelationOption {
@@ -442,7 +446,9 @@ function QueryTab({
         query = parseResult.tuple;
       }
 
+      const startedAt = performance.now();
       const response = await OpenFGAService.check(storeId, query, authModelId);
+      const latencyMs = performance.now() - startedAt;
       const result = response.allowed;
 
       // Show result in snackbar
@@ -457,6 +463,7 @@ function QueryTab({
         result: { allowed: result },
         timestamp: Date.now(),
         queryText: formatQueryAsText(query),
+        latencyMs,
       };
 
       setSavedQueries((prev) => [newQuery, ...prev].slice(0, 10));
@@ -1014,9 +1021,19 @@ function QueryTab({
                         flex: 1,
                         display: "flex",
                         justifyContent: "flex-end",
+                        alignItems: "center",
+                        gap: 1,
                         fontSize: "0.7rem",
                       }}
                     >
+                      {typeof query.latencyMs === "number" && (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={formatMs(query.latencyMs)}
+                          sx={{ height: 18, fontSize: "0.65rem" }}
+                        />
+                      )}
                       {new Date(query.timestamp).toLocaleString()}
                     </Box>
                   </Alert>

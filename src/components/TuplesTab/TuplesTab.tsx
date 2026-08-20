@@ -275,7 +275,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
       if (freeformCondition.trim()) {
         try {
           conditionData = JSON.parse(freeformCondition);
-        } catch (e) {
+        } catch {
           throw new Error('Invalid condition format. Please provide valid JSON.');
         }
       }
