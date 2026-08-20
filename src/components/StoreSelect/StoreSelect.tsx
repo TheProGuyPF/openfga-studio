@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Button, 
   Box, 
@@ -7,8 +7,7 @@ import {
   Dialog, 
   DialogTitle, 
   DialogContent, 
-  DialogActions, 
-  Alert, 
+  DialogActions,
   Select,
   MenuItem,
   FormControl,
@@ -16,6 +15,7 @@ import {
 } from '@mui/material';
 import { OpenFGAService } from '../../services/OpenFGAService';
 import { useEnvironment } from '../../contexts/EnvironmentContext';
+import { useToast } from '../../contexts/ToastContext';
 
 interface Store {
   id: string;
@@ -25,41 +25,55 @@ interface Store {
 interface StoreSelectProps {
   selectedStore?: string;
   onStoreChange: (storeId: string, storeName: string) => void;
+  /** Optionally control the create-store dialog from a parent (e.g. an empty-state CTA). */
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
 }
 
-export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) => {
+export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreateOpenChange }: StoreSelectProps) => {
   const { environment } = useEnvironment();
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const { toast } = useToast();
+  const [internalCreateOpen, setInternalCreateOpen] = useState(false);
+  // Controlled when the parent passes createOpen; otherwise self-managed.
+  const isCreateDialogOpen = createOpen ?? internalCreateOpen;
+  const setCreateOpen = onCreateOpenChange ?? setInternalCreateOpen;
   const [newStoreName, setNewStoreName] = useState('');
   const [creatingStore, setCreatingStore] = useState(false);
+  // Ensures the initial auto-select / restore-sync runs once, not on every refresh.
+  const didInitialSelect = useRef(false);
 
   const loadStores = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
       const storesList = await OpenFGAService.listStores();
       setStores(storesList);
 
-      // If we have stores but none selected, prefer this env's configured
-      // default store, otherwise fall back to the first one.
-      if (storesList.length > 0 && !selectedStore) {
-        const preferred = environment.storeId
-          ? storesList.find((s) => s.id === environment.storeId)
-          : undefined;
-        const pick = preferred ?? storesList[0];
-        onStoreChange(pick.id, pick.name);
+      if (storesList.length > 0 && !didInitialSelect.current) {
+        didInitialSelect.current = true;
+        if (!selectedStore) {
+          // Nothing selected: prefer this env's configured default, else the first.
+          const preferred = environment.storeId
+            ? storesList.find((s) => s.id === environment.storeId)
+            : undefined;
+          const pick = preferred ?? storesList[0];
+          onStoreChange(pick.id, pick.name);
+        } else {
+          // A store is preselected (restored from URL/persistence): sync its name
+          // and load its model. No-op if it isn't in this env's list.
+          const current = storesList.find((s) => s.id === selectedStore);
+          if (current) onStoreChange(current.id, current.name);
+        }
       }
     } catch (error) {
       console.error('Failed to load stores:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load stores. Please try again.');
+      toast(error instanceof Error ? error.message : 'Failed to load stores. Please try again.', 'error');
       setStores([]); // Ensure stores is always an array
     } finally {
       setLoading(false);
     }
-  }, [selectedStore, onStoreChange, environment.storeId]);
+  }, [selectedStore, onStoreChange, environment.storeId, toast]);
 
   useEffect(() => {
     loadStores();
@@ -70,14 +84,13 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
 
     try {
       setCreatingStore(true);
-      setError(null);
       await OpenFGAService.createStore(newStoreName.trim());
       setNewStoreName('');
-      setIsCreateDialogOpen(false);
+      setCreateOpen(false);
       await loadStores(); // Reload stores after creating new one
     } catch (error) {
       console.error('Failed to create store:', error);
-      setError('Failed to create store. Please try again.');
+      toast('Failed to create store. Please try again.', 'error');
     } finally {
       setCreatingStore(false);
     }
@@ -104,23 +117,6 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 200 }}>
-        {error && (
-          <Alert 
-            severity="error" 
-            sx={{ 
-              position: 'fixed',
-              right: 16,
-              top: 72,
-              zIndex: 1400,
-              minWidth: 300,
-              boxShadow: (theme) => theme.shadows[3],
-              animation: 'slideIn 0.3s ease-out',
-            }}
-          >
-            {error}
-          </Alert>
-        )}
-        
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <Select
@@ -168,7 +164,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
           <Button
             variant="outlined"
             size="small"
-            onClick={() => setIsCreateDialogOpen(true)}
+            onClick={() => setCreateOpen(true)}
             sx={{
               borderColor: 'divider',
               '&:hover': {
@@ -183,7 +179,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
 
       <Dialog 
         open={isCreateDialogOpen} 
-        onClose={() => setIsCreateDialogOpen(false)}
+        onClose={() => setCreateOpen(false)}
         PaperProps={{
           sx: {
             bgcolor: 'background.paper',
@@ -201,6 +197,12 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
             variant="outlined"
             value={newStoreName}
             onChange={(e) => setNewStoreName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newStoreName.trim() && !creatingStore) {
+                e.preventDefault();
+                handleCreateStore();
+              }
+            }}
             sx={{
               mt: 1,
               '& .MuiOutlinedInput-root': {
@@ -213,7 +215,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
         </DialogContent>
         <DialogActions>
           <Button 
-            onClick={() => setIsCreateDialogOpen(false)}
+            onClick={() => setCreateOpen(false)}
             sx={{
               color: 'text.secondary',
               '&:hover': {

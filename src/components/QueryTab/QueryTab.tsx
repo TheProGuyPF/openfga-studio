@@ -10,8 +10,6 @@ import {
   Autocomplete,
   alpha,
   Alert,
-  Snackbar,
-  Chip,
 } from "@mui/material";
 import { OpenFGAService } from "../../services/OpenFGAService";
 import {
@@ -19,7 +17,10 @@ import {
   type RelationshipMetadata,
   type RelationshipTuple,
 } from "../../utils/tupleHelper";
-import { formatMs } from "../../utils/latencyStats";
+import { useToast } from "../../contexts/ToastContext";
+import { useHistory } from "../../hooks/useHistory";
+import { HistoryPanel } from "../History/HistoryPanel";
+import { addHistoryEntry, type HistoryEntry } from "../../services/historyStore";
 
 interface PendingPrefill {
   user: string;
@@ -33,15 +34,6 @@ interface QueryTabProps {
   authModelId: string;
   pendingPrefill?: PendingPrefill | null;
   onPrefillConsumed?: () => void;
-}
-
-interface SavedQuery {
-  timestamp: number;
-  query: RelationshipTuple;
-  result: { allowed: boolean };
-  queryText?: string;
-  /** Client-observed latency (ms) for this check. */
-  latencyMs?: number;
 }
 
 interface RelationOption {
@@ -76,7 +68,7 @@ function QueryTab({
   const [relation, setRelation] = useState<RelationOption | null>(null);
   const [object, setObject] = useState("");
   const [textQuery, setTextQuery] = useState("");
-  const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
+  const { entries: historyEntries, remove: removeHistory, clear: clearHistory } = useHistory(storeId);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [conditionState, setConditionState] = useState<ConditionState | null>(
@@ -89,15 +81,7 @@ function QueryTab({
     null
   );
   const [conversionWarning, setConversionWarning] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({
-    open: false,
-    message: "",
-    severity: "success",
-  });
+  const { toast } = useToast();
 
   // Available types from metadata
   const availableTypes = useMemo(
@@ -162,31 +146,8 @@ function QueryTab({
     }
   }, [currentModel]);
 
-  useEffect(() => {
-    const saved = localStorage.getItem(`queries-${storeId}`);
-    if (saved) {
-      try {
-        setSavedQueries(JSON.parse(saved));
-      } catch (error) {
-        console.error("Failed to load saved queries:", error);
-        setSavedQueries([]);
-      }
-    } else {
-      setSavedQueries([]);
-    }
-  }, [storeId]);
-
-  useEffect(() => {
-    if (!storeId) return;
-    try {
-      localStorage.setItem(
-        `queries-${storeId}`,
-        JSON.stringify(savedQueries)
-      );
-    } catch (error) {
-      console.error("Failed to persist saved queries:", error);
-    }
-  }, [savedQueries, storeId]);
+  // Query history is persisted via the shared historyStore in handleSubmit and
+  // read through useHistory — no per-tab localStorage effects needed.
 
   useEffect(() => {
     if (!pendingPrefill) return;
@@ -405,9 +366,15 @@ function QueryTab({
     setQueryMode(newMode);
   };
 
-  const handleReplayQuery = (savedQuery: SavedQuery) => {
+  const handleReplayQuery = (entry: HistoryEntry) => {
     setQueryMode("text");
-    setTextQuery(formatQueryAsText(savedQuery.query));
+    setTextQuery(
+      formatQueryAsText({
+        user: entry.user || "",
+        relation: entry.relation || "",
+        object: entry.object || "",
+      })
+    );
     setError(null);
     setConversionWarning(null);
   };
@@ -417,9 +384,8 @@ function QueryTab({
     setError(null);
     setIsSubmitting(true);
 
+    let query: RelationshipTuple | null = null;
     try {
-      let query: RelationshipTuple;
-
       if (queryMode === "form") {
         const formattedUser = user.includes(":") ? user : `${selectedType}:${user}`;
         const formattedObject = object.includes(":") ? object : `${selectedObjectType}:${object}`;
@@ -451,22 +417,21 @@ function QueryTab({
       const latencyMs = performance.now() - startedAt;
       const result = response.allowed;
 
-      // Show result in snackbar
-      setSnackbar({
-        open: true,
-        message: result ? "Access Allowed" : "Access Denied",
-        severity: result ? "success" : "error"
-      });
+      toast(result ? "Access Allowed" : "Access Denied", result ? "success" : "error");
 
-      const newQuery: SavedQuery = {
-        query,
-        result: { allowed: result },
-        timestamp: Date.now(),
-        queryText: formatQueryAsText(query),
+      addHistoryEntry({
+        op: "check",
+        storeId,
+        authModelId,
+        user: query.user,
+        relation: query.relation,
+        object: query.object,
+        context: query.condition?.context,
+        outcome: result ? "allowed" : "denied",
+        allowed: result,
         latencyMs,
-      };
-
-      setSavedQueries((prev) => [newQuery, ...prev].slice(0, 10));
+        label: formatQueryAsText(query),
+      });
 
       // Optionally reset form in form mode
       if (queryMode === "form") {
@@ -481,11 +446,20 @@ function QueryTab({
       console.error("Query check failed:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to check access";
       setError(errorMessage);
-      setSnackbar({
-        open: true,
-        message: errorMessage,
-        severity: "error"
-      });
+      toast(errorMessage, "error");
+      if (query) {
+        addHistoryEntry({
+          op: "check",
+          storeId,
+          authModelId,
+          user: query.user,
+          relation: query.relation,
+          object: query.object,
+          outcome: "error",
+          error: errorMessage,
+          label: formatQueryAsText(query),
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -911,137 +885,18 @@ function QueryTab({
                 </Paper>
               </Box>
             )}
-
-            {/* Result Snackbar */}
-            <Snackbar
-              open={snackbar.open}
-              autoHideDuration={10000}
-              onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-              anchorOrigin={{ vertical: "top", horizontal: "right" }}
-            >
-              <Alert
-                onClose={() =>
-                  setSnackbar((prev) => ({ ...prev, open: false }))
-                }
-                severity={snackbar.severity}
-                variant="filled"
-                sx={{
-                  width: "100%",
-                  "& .MuiAlert-message": {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 2,
-                  },
-                }}
-              >
-                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                    {snackbar.message}
-                  </Typography>
-                </Box>
-              </Alert>
-            </Snackbar>
           </Box>
         </Paper>
 
-        {/* Recent Queries */}
-        {savedQueries.length > 0 && (
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
-            <Typography variant="h6" sx={{ mb: 2, fontSize: 16 }}>
-              Recent Queries
-            </Typography>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-              {savedQueries.map((query, index) => (
-                <Paper
-                  key={index}
-                  variant="outlined"
-                  sx={{
-                    p: 2,
-                    cursor: "pointer",
-                    bgcolor: "background.paper",
-                    "&:hover": {
-                      bgcolor: "action.hover",
-                    },
-                  }}
-                  onClick={() => handleReplayQuery(query)}
-                >
-                  <Typography variant="body1" color="text.secondary">
-                    {query.queryText || (
-                      <Box component="span">
-                        {`${query.query.user} - ${query.query.relation} - ${query.query.object}`}
-                        {query.query.condition && (
-                          <>
-                            &nbsp;with {query.query.condition.name} (
-                            {Object.entries(query.query.condition.context)
-                              .map(([key, value]) => `${key}: ${value}`)
-                              .join(", ")}
-                            )
-                          </>
-                        )}
-                      </Box>
-                    )}
-                  </Typography>
-
-                  <Alert
-                    severity={query.result.allowed ? "success" : "error"}
-                    sx={{
-                      mt: 1,
-                      backgroundColor: (theme) =>
-                        query.result.allowed
-                          ? alpha(theme.palette.success.main, 0.08)
-                          : alpha(theme.palette.error.main, 0.08),
-                      border: "none",
-                      "& .MuiAlert-message": {
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        width: "100%",
-                      },
-                      "& .MuiAlert-icon": {
-                        color: (theme) =>
-                          query.result.allowed
-                            ? theme.palette.success.main
-                            : theme.palette.error.main,
-                        opacity: 0.8,
-                      },
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        flex: 1,
-                        display: "flex",
-                        justifyContent: "flex-start",
-                      }}
-                    >
-                      {query.result.allowed ? "Allowed" : "Denied"}
-                    </Box>
-
-                    <Box
-                      sx={{
-                        flex: 1,
-                        display: "flex",
-                        justifyContent: "flex-end",
-                        alignItems: "center",
-                        gap: 1,
-                        fontSize: "0.7rem",
-                      }}
-                    >
-                      {typeof query.latencyMs === "number" && (
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label={formatMs(query.latencyMs)}
-                          sx={{ height: 18, fontSize: "0.65rem" }}
-                        />
-                      )}
-                      {new Date(query.timestamp).toLocaleString()}
-                    </Box>
-                  </Alert>
-                </Paper>
-              ))}
-            </Box>
-          </Paper>
-        )}
+        {/* Check history (persistent, per environment + store) */}
+        <HistoryPanel
+          entries={historyEntries}
+          ops={["check"]}
+          title="History"
+          onReplay={handleReplayQuery}
+          onDelete={removeHistory}
+          onClear={clearHistory}
+        />
       </Box>
     </Box>
   );

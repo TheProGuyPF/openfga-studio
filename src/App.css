@@ -2,38 +2,8 @@
   width: 100%;
   min-height: 100vh;
   margin: 0;
-  background-color: #f5f5f5;
-}
-
-.editor-container {
-  height: 600px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.react-flow-wrapper {
-  flex-grow: 1;
-  height: 100%;
-  min-height: 500px;
-}
-
-.react-flow__container {
-  height: 100%;
-}
-
-.graph-container {
-  height: 600px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background-color: white;
-}
-
-.tuple-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
+  /* Background is painted by MUI CssBaseline / theme (background.default) so it
+     follows the light/dark theme instead of being hardcoded. */
 }
 
 .query-runner {

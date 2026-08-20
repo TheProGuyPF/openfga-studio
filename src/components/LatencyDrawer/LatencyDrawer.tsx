@@ -83,7 +83,7 @@ export function LatencyDrawer() {
 
   if (!open) {
     return (
-      <Box sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: (t) => t.zIndex.tooltip }}>
+      <Box sx={{ position: 'fixed', bottom: 16, left: 16, zIndex: (t) => t.zIndex.speedDial }}>
         <Tooltip title="Latency monitor">
           <Chip
             icon={<SpeedIcon />}
@@ -103,10 +103,10 @@ export function LatencyDrawer() {
       sx={{
         position: 'fixed',
         bottom: 16,
-        right: 16,
+        left: 16,
         width: 360,
         maxWidth: 'calc(100vw - 32px)',
-        zIndex: (t) => t.zIndex.tooltip,
+        zIndex: (t) => t.zIndex.speedDial,
         p: 1.5,
       }}
     >

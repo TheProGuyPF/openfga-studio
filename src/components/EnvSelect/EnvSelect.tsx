@@ -14,6 +14,7 @@ import {
   Button,
 } from '@mui/material';
 import { useEnvironment } from '../../contexts/EnvironmentContext';
+import { useDirtyState } from '../../contexts/DirtyStateContext';
 import {
   isEnvConfigured,
   isGuarded,
@@ -38,14 +39,16 @@ function TierChip({ env }: { env: Environment }) {
 
 export function EnvSelect() {
   const { currentEnvKey, environments, switchEnv } = useEnvironment();
+  const { isAnyDirty } = useDirtyState();
   const [pendingKey, setPendingKey] = useState<EnvKey | null>(null);
 
   const request = (key: EnvKey) => {
     if (key === currentEnvKey) return;
     const target = environments.find((e) => e.key === key);
     if (!target) return;
-    // Guarded (prod / canary) envs require explicit confirmation before switching in.
-    if (isGuarded(target)) {
+    // Confirm before switching into a guarded (prod/canary) env, OR whenever there
+    // is unsaved work that the remount would discard.
+    if (isGuarded(target) || isAnyDirty()) {
       setPendingKey(key);
     } else {
       switchEnv(key);
@@ -54,6 +57,8 @@ export function EnvSelect() {
 
   const pendingEnv = environments.find((e) => e.key === pendingKey) ?? null;
   const pendingColor = pendingEnv ? ENV_TIER_STYLE[pendingEnv.tier]?.color ?? 'error' : 'error';
+  const pendingGuarded = pendingEnv ? isGuarded(pendingEnv) : false;
+  const pendingDirty = pendingEnv ? isAnyDirty() : false;
 
   return (
     <>
@@ -94,10 +99,21 @@ export function EnvSelect() {
       <Dialog open={Boolean(pendingEnv)} onClose={() => setPendingKey(null)}>
         <DialogTitle>Switch to {pendingEnv?.label}?</DialogTitle>
         <DialogContent>
-          <DialogContentText>
-            You are about to connect to <strong>{pendingEnv?.label}</strong>, a protected environment.
-            Writing tuples, saving authorization models, and creating stores here affect real data.
-            Continue?
+          <DialogContentText component="div">
+            {pendingGuarded && (
+              <>
+                You are about to connect to <strong>{pendingEnv?.label}</strong>, a protected
+                environment. Writing tuples, saving authorization models, and creating stores here
+                affect real data.
+              </>
+            )}
+            {pendingDirty && (
+              <Box sx={{ mt: pendingGuarded ? 1 : 0 }}>
+                <strong>You have unsaved changes</strong> that will be discarded when the workspace
+                reloads for the new environment.
+              </Box>
+            )}
+            {' '}Continue?
           </DialogContentText>
         </DialogContent>
         <DialogActions>

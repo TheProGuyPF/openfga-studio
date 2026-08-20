@@ -15,6 +15,8 @@ interface AppHeaderProps {
   authModelId: string;
   onStoreChange: (storeId: string, storeName: string) => void;
   onToggleTheme: () => void;
+  createStoreOpen?: boolean;
+  onCreateStoreOpenChange?: (open: boolean) => void;
 }
 
 function formatTimestamp(ts: number | null): string {
@@ -22,7 +24,7 @@ function formatTimestamp(ts: number | null): string {
   return new Date(ts).toLocaleTimeString();
 }
 
-export const AppHeader = ({ selectedStore, storeName, authModelId, onStoreChange, onToggleTheme }: AppHeaderProps) => {
+export const AppHeader = ({ selectedStore, storeName, authModelId, onStoreChange, onToggleTheme, createStoreOpen, onCreateStoreOpenChange }: AppHeaderProps) => {
   const theme = useTheme();
   const { tokenStatus, error, lastRefreshedAt, refresh, isConfigured } = useToken();
 
@@ -53,6 +55,8 @@ export const AppHeader = ({ selectedStore, storeName, authModelId, onStoreChange
           <StoreSelect
             selectedStore={selectedStore}
             onStoreChange={onStoreChange}
+            createOpen={createStoreOpen}
+            onCreateOpenChange={onCreateStoreOpenChange}
           />
         </Box>
 
@@ -86,9 +90,15 @@ export const AppHeader = ({ selectedStore, storeName, authModelId, onStoreChange
           </Tooltip>
         )}
 
-        <IconButton onClick={onToggleTheme} color="inherit">
-          {theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
-        </IconButton>
+        <Tooltip title={theme.palette.mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+          <IconButton
+            onClick={onToggleTheme}
+            color="inherit"
+            aria-label={theme.palette.mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+          </IconButton>
+        </Tooltip>
       </Toolbar>
     </AppBar>
   );
