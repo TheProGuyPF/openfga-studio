@@ -1,13 +1,23 @@
 import { useState, useMemo, useCallback, Suspense, lazy } from 'react';
 import { Box, CssBaseline, ThemeProvider, createTheme, Tabs, Tab } from '@mui/material';
+import StorageIcon from '@mui/icons-material/Storage';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import { ProdBanner } from './components/EnvSelect/ProdBanner';
 import { LatencyDrawer } from './components/LatencyDrawer/LatencyDrawer';
+import { TabLoader } from './components/common/TabLoader';
+import { EmptyState } from './components/common/EmptyState';
 import { OpenFGAService } from './services/OpenFGAService';
 import { TokenProvider } from './contexts/TokenContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { EnvironmentProvider, useEnvironment } from './contexts/EnvironmentContext';
+import { useLocalStorage } from './hooks/useLocalStorage';
 import type { PendingQueryPrefill } from './components/LookupTab/types';
 import './App.css';
+
+const prefersDark = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-color-scheme: dark)').matches;
 
 const AuthModelTab = lazy(() => import('./components/AuthModelTab/AuthModelTab'));
 const TuplesTab = lazy(() => import('./components/TuplesTab/TuplesTab'));
@@ -20,7 +30,10 @@ const LOOKUP_TAB_INDEX = 3;
 const BENCHMARK_TAB_INDEX = 4;
 
 function App() {
-  const [mode, setMode] = useState<'light' | 'dark'>('dark');
+  // Persisted theme; first-run default honors the OS color scheme.
+  const [mode, setMode] = useLocalStorage<'light' | 'dark'>('openfga-studio.theme', () =>
+    prefersDark() ? 'dark' : 'light',
+  );
 
   const theme = useMemo(
     () =>
@@ -38,14 +51,16 @@ function App() {
 
   const toggleTheme = useCallback(
     () => setMode((m) => (m === 'light' ? 'dark' : 'light')),
-    []
+    [setMode]
   );
 
   return (
     <EnvironmentProvider>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <AppShell onToggleTheme={toggleTheme} />
+        <ToastProvider>
+          <AppShell onToggleTheme={toggleTheme} />
+        </ToastProvider>
       </ThemeProvider>
     </EnvironmentProvider>
   );
@@ -82,6 +97,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
   const [authModelId, setAuthModelId] = useState('');
   const [pendingQueryPrefill, setPendingQueryPrefill] =
     useState<PendingQueryPrefill | null>(null);
+  const [createStoreOpen, setCreateStoreOpen] = useState(false);
 
   const handleStoreChange = async (storeId: string, storeName: string) => {
     setSelectedStoreId(storeId);
@@ -121,9 +137,20 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
           authModelId={authModelId}
           onStoreChange={handleStoreChange}
           onToggleTheme={onToggleTheme}
+          createStoreOpen={createStoreOpen}
+          onCreateStoreOpenChange={setCreateStoreOpen}
         />
 
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {!selectedStoreId && (
+            <EmptyState
+              icon={<StorageIcon sx={{ fontSize: 56, opacity: 0.5 }} />}
+              title="No store selected"
+              description="Choose a store from the header to start modeling, writing tuples, and running checks — or create a new one."
+              actionLabel="Create store"
+              onAction={() => setCreateStoreOpen(true)}
+            />
+          )}
           {selectedStoreId && (
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -154,7 +181,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                   overflow: 'hidden'
                 }}>
                   {activeTab === 0 ? (
-                    <Suspense fallback={<div>Loading...</div>}>
+                    <Suspense fallback={<TabLoader />}>
                       <AuthModelTab 
                         storeId={selectedStoreId}
                         storeName={selectedStoreName}
@@ -163,7 +190,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                       />
                     </Suspense>
                   ) : activeTab === 1 ? (
-                    <Suspense fallback={<div>Loading...</div>}>
+                    <Suspense fallback={<TabLoader />}>
                       <TuplesTab 
                         storeId={selectedStoreId} 
                         currentModel={authModel}
@@ -171,7 +198,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                       />
                     </Suspense>
                   ) : activeTab === QUERY_TAB_INDEX ? (
-                    <Suspense fallback={<div>Loading...</div>}>
+                    <Suspense fallback={<TabLoader />}>
                       <QueryTab
                         storeId={selectedStoreId}
                         currentModel={authModel}
@@ -181,7 +208,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                       />
                     </Suspense>
                   ) : activeTab === LOOKUP_TAB_INDEX ? (
-                    <Suspense fallback={<div>Loading...</div>}>
+                    <Suspense fallback={<TabLoader />}>
                       <LookupTab
                         storeId={selectedStoreId}
                         currentModel={authModel}
@@ -190,7 +217,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                       />
                     </Suspense>
                   ) : activeTab === BENCHMARK_TAB_INDEX ? (
-                    <Suspense fallback={<div>Loading...</div>}>
+                    <Suspense fallback={<TabLoader />}>
                       <BenchmarkTab
                         storeId={selectedStoreId}
                         currentModel={authModel}

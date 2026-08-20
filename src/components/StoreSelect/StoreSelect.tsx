@@ -25,14 +25,20 @@ interface Store {
 interface StoreSelectProps {
   selectedStore?: string;
   onStoreChange: (storeId: string, storeName: string) => void;
+  /** Optionally control the create-store dialog from a parent (e.g. an empty-state CTA). */
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
 }
 
-export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) => {
+export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreateOpenChange }: StoreSelectProps) => {
   const { environment } = useEnvironment();
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [internalCreateOpen, setInternalCreateOpen] = useState(false);
+  // Controlled when the parent passes createOpen; otherwise self-managed.
+  const isCreateDialogOpen = createOpen ?? internalCreateOpen;
+  const setCreateOpen = onCreateOpenChange ?? setInternalCreateOpen;
   const [newStoreName, setNewStoreName] = useState('');
   const [creatingStore, setCreatingStore] = useState(false);
 
@@ -73,7 +79,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
       setError(null);
       await OpenFGAService.createStore(newStoreName.trim());
       setNewStoreName('');
-      setIsCreateDialogOpen(false);
+      setCreateOpen(false);
       await loadStores(); // Reload stores after creating new one
     } catch (error) {
       console.error('Failed to create store:', error);
@@ -114,7 +120,6 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
               zIndex: 1400,
               minWidth: 300,
               boxShadow: (theme) => theme.shadows[3],
-              animation: 'slideIn 0.3s ease-out',
             }}
           >
             {error}
@@ -168,7 +173,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
           <Button
             variant="outlined"
             size="small"
-            onClick={() => setIsCreateDialogOpen(true)}
+            onClick={() => setCreateOpen(true)}
             sx={{
               borderColor: 'divider',
               '&:hover': {
@@ -183,7 +188,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
 
       <Dialog 
         open={isCreateDialogOpen} 
-        onClose={() => setIsCreateDialogOpen(false)}
+        onClose={() => setCreateOpen(false)}
         PaperProps={{
           sx: {
             bgcolor: 'background.paper',
@@ -201,6 +206,12 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
             variant="outlined"
             value={newStoreName}
             onChange={(e) => setNewStoreName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && newStoreName.trim() && !creatingStore) {
+                e.preventDefault();
+                handleCreateStore();
+              }
+            }}
             sx={{
               mt: 1,
               '& .MuiOutlinedInput-root': {
@@ -213,7 +224,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange }: StoreSelectProps) 
         </DialogContent>
         <DialogActions>
           <Button 
-            onClick={() => setIsCreateDialogOpen(false)}
+            onClick={() => setCreateOpen(false)}
             sx={{
               color: 'text.secondary',
               '&:hover': {

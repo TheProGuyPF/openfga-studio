@@ -221,33 +221,17 @@ export const AuthModelGraph = ({
                 Definition
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ 
-                  width: 14, 
-                  height: 14, 
-                  borderRadius: '4px', 
-                  background: theme.palette.mode === 'dark' ? '#fff3e0' : '#fff3e0',
-                  border: `2px solid #ff9800`
+                <div style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: '4px',
+                  background: theme.palette.mode === 'dark' ? theme.palette.warning.dark : '#fff3e0',
+                  border: `2px solid ${theme.palette.warning.main}`
                 }}></div>
                 Condition
               </span>
             </div>
           </Panel>
-          {/*Removing duplicate legends <Panel position="bottom-right" style={{ 
-            marginBottom: '8px', 
-            marginRight: '8px', 
-            padding: '8px',
-            background: theme.palette.background.paper,
-            borderRadius: '6px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            border: `1px solid ${theme.palette.divider}`
-          }}>
-            <Typography variant="subtitle2" style={{ marginBottom: '8px', color: theme.palette.text.primary }}>
-              Legend
-            </Typography>
-            <LegendItem label="Type" color={theme.palette.mode === 'dark' ? theme.palette.primary.dark : '#e3f2fd'} />
-            <LegendItem label="Relation" color={theme.palette.mode === 'dark' ? theme.palette.grey[800] : '#f5f5f5'} />
-            <LegendItem label="Definition" color={theme.palette.mode === 'dark' ? theme.palette.success.dark : '#f1f8e9'} />
-          </Panel>*/}
         </ReactFlow>
       </ReactFlowProvider>
     </div>
