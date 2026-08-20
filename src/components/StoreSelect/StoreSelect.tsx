@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Button, 
   Box, 
@@ -41,6 +41,8 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
   const setCreateOpen = onCreateOpenChange ?? setInternalCreateOpen;
   const [newStoreName, setNewStoreName] = useState('');
   const [creatingStore, setCreatingStore] = useState(false);
+  // Ensures the initial auto-select / restore-sync runs once, not on every refresh.
+  const didInitialSelect = useRef(false);
 
   const loadStores = useCallback(async () => {
     try {
@@ -49,14 +51,21 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
       const storesList = await OpenFGAService.listStores();
       setStores(storesList);
 
-      // If we have stores but none selected, prefer this env's configured
-      // default store, otherwise fall back to the first one.
-      if (storesList.length > 0 && !selectedStore) {
-        const preferred = environment.storeId
-          ? storesList.find((s) => s.id === environment.storeId)
-          : undefined;
-        const pick = preferred ?? storesList[0];
-        onStoreChange(pick.id, pick.name);
+      if (storesList.length > 0 && !didInitialSelect.current) {
+        didInitialSelect.current = true;
+        if (!selectedStore) {
+          // Nothing selected: prefer this env's configured default, else the first.
+          const preferred = environment.storeId
+            ? storesList.find((s) => s.id === environment.storeId)
+            : undefined;
+          const pick = preferred ?? storesList[0];
+          onStoreChange(pick.id, pick.name);
+        } else {
+          // A store is preselected (restored from URL/persistence): sync its name
+          // and load its model. No-op if it isn't in this env's list.
+          const current = storesList.find((s) => s.id === selectedStore);
+          if (current) onStoreChange(current.id, current.name);
+        }
       }
     } catch (error) {
       console.error('Failed to load stores:', error);

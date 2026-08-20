@@ -8,6 +8,7 @@ import { AuthModelGraph } from '../AuthModelGraph/AuthModelGraph';
 import { OpenFGAService } from '../../services/OpenFGAService';
 import { parseAuthModelToGraph } from '../../utils/authModelParser';
 import { dslToJson } from '../../utils/modelConverter';
+import { useRegisterDirty } from '../../contexts/DirtyStateContext';
 import type { Node, Edge, NodeChange, EdgeChange } from 'reactflow';
 import { applyNodeChanges, applyEdgeChanges } from 'reactflow';
 
@@ -29,6 +30,9 @@ export default function AuthModelTab({ storeId, storeName, initialModel, onModel
     message: string;
     severity: 'success' | 'error';
   }>({ open: false, message: '', severity: 'success' });
+
+  // Track unsaved edits so the app can warn before refresh / tab / env switch.
+  useRegisterDirty('auth-model', authModel !== initialModel);
 
   useEffect(() => {
     setAuthModel(initialModel);

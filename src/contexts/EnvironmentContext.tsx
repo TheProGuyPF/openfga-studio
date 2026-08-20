@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 import { ENV_ORDER, environments, type EnvKey, type Environment } from '../environments';
 import { getCurrentEnvKey, setCurrentEnvKey } from '../services/environmentStore';
 import { setApiToken } from '../services/tokenStore';
+import { setSearchParam } from '../utils/urlState';
 
 interface EnvironmentContextValue {
   currentEnvKey: EnvKey;
@@ -32,6 +33,9 @@ export function EnvironmentProvider({ children }: { children: ReactNode }) {
       if (key === currentEnvKey) return;
       // Drop any token from the previous env so the new env re-authenticates.
       setApiToken(null);
+      // The selected store is per-env; clear the URL's ?store so the new env
+      // restores its own persisted store rather than inheriting the old id.
+      setSearchParam('store', null);
       // Update the module store first (services read from it synchronously)...
       setCurrentEnvKey(key);
       // ...then the React state, which remounts the keyed workspace and resets
