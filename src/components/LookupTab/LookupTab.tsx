@@ -18,6 +18,9 @@ import {
   type RelationshipMetadata,
 } from '../../utils/tupleHelper';
 import { formatMs } from '../../utils/latencyStats';
+import { useHistory } from '../../hooks/useHistory';
+import { HistoryPanel } from '../History/HistoryPanel';
+import { addHistoryEntry, type HistoryEntry } from '../../services/historyStore';
 import { EffectiveAccessForm } from './EffectiveAccessForm';
 import { DirectTuplesForm } from './DirectTuplesForm';
 import { LookupResults } from './LookupResults';
@@ -89,6 +92,7 @@ export default function LookupTab({
   onCheckTupleInQueryTab,
 }: LookupTabProps) {
   const [mode, setMode] = useState<LookupMode>('effective');
+  const { entries: historyEntries, remove: removeHistory, clear: clearHistory } = useHistory(storeId);
   const [metadata, setMetadata] = useState<RelationshipMetadata | undefined>();
   const [effectiveValues, setEffectiveValues] = useState<EffectiveFormValues>(
     EMPTY_EFFECTIVE
@@ -171,7 +175,8 @@ export default function LookupTab({
         context,
         authorizationModelId: authModelId || undefined,
       });
-      setLastLatencyMs(performance.now() - startedAt);
+      const latencyMs = performance.now() - startedAt;
+      setLastLatencyMs(latencyMs);
 
       setEffectiveResult({
         query: {
@@ -181,12 +186,35 @@ export default function LookupTab({
         },
         objects,
       });
+      addHistoryEntry({
+        op: 'list-objects',
+        storeId,
+        authModelId,
+        user: userId,
+        relation: effectiveValues.relation,
+        objectType: effectiveValues.objectType,
+        outcome: 'allowed',
+        objectCount: objects.length,
+        latencyMs,
+        label: `${userId} → ${effectiveValues.relation} → ${effectiveValues.objectType}`,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to list objects';
       setError(message);
       setEffectiveResult(null);
       showSnack(message, 'error');
+      addHistoryEntry({
+        op: 'list-objects',
+        storeId,
+        authModelId,
+        user: `${effectiveValues.userType}:${effectiveValues.userName}`,
+        relation: effectiveValues.relation,
+        objectType: effectiveValues.objectType,
+        outcome: 'error',
+        error: message,
+        label: `${effectiveValues.userType}:${effectiveValues.userName} → ${effectiveValues.relation} → ${effectiveValues.objectType}`,
+      });
     } finally {
       setLoading(false);
     }
@@ -222,12 +250,25 @@ export default function LookupTab({
         ...filters,
         page_size: DEFAULT_PAGE_SIZE,
       });
-      setLastLatencyMs(performance.now() - startedAt);
+      const latencyMs = performance.now() - startedAt;
+      setLastLatencyMs(latencyMs);
       setDirectResult({
         query: filters,
         tuples: response.tuples,
         continuationToken: response.continuation_token,
         totalLoaded: response.tuples.length,
+      });
+      const filterLabel =
+        [filters.user, filters.relation, filters.object].filter(Boolean).join(' · ') || 'all tuples';
+      addHistoryEntry({
+        op: 'read',
+        storeId,
+        authModelId,
+        filters,
+        outcome: 'allowed',
+        objectCount: response.tuples.length,
+        latencyMs,
+        label: `read: ${filterLabel}`,
       });
     } catch (err) {
       const message =
@@ -235,10 +276,63 @@ export default function LookupTab({
       setError(message);
       setDirectResult(null);
       showSnack(message, 'error');
+      const filters = buildDirectFilters();
+      const filterLabel =
+        [filters.user, filters.relation, filters.object].filter(Boolean).join(' · ') || 'all tuples';
+      addHistoryEntry({
+        op: 'read',
+        storeId,
+        authModelId,
+        filters,
+        outcome: 'error',
+        error: message,
+        label: `read: ${filterLabel}`,
+      });
     } finally {
       setLoading(false);
     }
-  }, [buildDirectFilters, storeId]);
+  }, [buildDirectFilters, storeId, authModelId]);
+
+  const handleReplayHistory = useCallback((entry: HistoryEntry) => {
+    const splitUser = (u: string) => {
+      const hash = u.indexOf('#');
+      const base = hash === -1 ? u : u.slice(0, hash);
+      const colon = base.indexOf(':');
+      return {
+        userType: colon === -1 ? base : base.slice(0, colon),
+        userName: colon === -1 ? '' : base.slice(colon + 1),
+        isUserset: hash !== -1,
+        usersetRelation: hash === -1 ? '' : u.slice(hash + 1),
+      };
+    };
+    if (entry.op === 'list-objects') {
+      const u = splitUser(entry.user || '');
+      setMode('effective');
+      setEffectiveValues((prev) => ({
+        ...prev,
+        userType: u.userType,
+        userName: u.userName,
+        relation: entry.relation || '',
+        objectType: entry.objectType || '',
+      }));
+    } else if (entry.op === 'read') {
+      const f = entry.filters || {};
+      const u = f.user ? splitUser(f.user) : { userType: '', userName: '', isUserset: false, usersetRelation: '' };
+      const obj = f.object || '';
+      const oc = obj.indexOf(':');
+      setMode('direct');
+      setDirectValues((prev) => ({
+        ...prev,
+        userType: u.userType,
+        userName: u.userName,
+        isUserset: u.isUserset,
+        usersetRelation: u.usersetRelation,
+        filterRelation: f.relation || '',
+        objectType: oc === -1 ? obj : obj.slice(0, oc),
+        objectId: oc === -1 ? '' : obj.slice(oc + 1),
+      }));
+    }
+  }, []);
 
   const handleLoadMore = useCallback(async () => {
     if (!directResult?.continuationToken) return;
@@ -509,6 +603,17 @@ export default function LookupTab({
           onLoadAll={handleLoadAll}
           onCopy={handleCopy}
         />
+
+        <Box sx={{ mt: 2 }}>
+          <HistoryPanel
+            entries={historyEntries}
+            ops={['list-objects', 'read']}
+            title="Lookup history"
+            onReplay={handleReplayHistory}
+            onDelete={removeHistory}
+            onClear={clearHistory}
+          />
+        </Box>
 
         <Snackbar
           open={snackbar.open}
