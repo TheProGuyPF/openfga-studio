@@ -10,7 +10,6 @@ import {
   Autocomplete,
   alpha,
   Alert,
-  Snackbar,
 } from "@mui/material";
 import { OpenFGAService } from "../../services/OpenFGAService";
 import {
@@ -18,6 +17,7 @@ import {
   type RelationshipMetadata,
   type RelationshipTuple,
 } from "../../utils/tupleHelper";
+import { useToast } from "../../contexts/ToastContext";
 import { useHistory } from "../../hooks/useHistory";
 import { HistoryPanel } from "../History/HistoryPanel";
 import { addHistoryEntry, type HistoryEntry } from "../../services/historyStore";
@@ -81,15 +81,7 @@ function QueryTab({
     null
   );
   const [conversionWarning, setConversionWarning] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{
-    open: boolean;
-    message: string;
-    severity: "success" | "error";
-  }>({
-    open: false,
-    message: "",
-    severity: "success",
-  });
+  const { toast } = useToast();
 
   // Available types from metadata
   const availableTypes = useMemo(
@@ -425,12 +417,7 @@ function QueryTab({
       const latencyMs = performance.now() - startedAt;
       const result = response.allowed;
 
-      // Show result in snackbar
-      setSnackbar({
-        open: true,
-        message: result ? "Access Allowed" : "Access Denied",
-        severity: result ? "success" : "error"
-      });
+      toast(result ? "Access Allowed" : "Access Denied", result ? "success" : "error");
 
       addHistoryEntry({
         op: "check",
@@ -459,11 +446,7 @@ function QueryTab({
       console.error("Query check failed:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to check access";
       setError(errorMessage);
-      setSnackbar({
-        open: true,
-        message: errorMessage,
-        severity: "error"
-      });
+      toast(errorMessage, "error");
       if (query) {
         addHistoryEntry({
           op: "check",
@@ -902,36 +885,6 @@ function QueryTab({
                 </Paper>
               </Box>
             )}
-
-            {/* Result Snackbar */}
-            <Snackbar
-              open={snackbar.open}
-              autoHideDuration={10000}
-              onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-              anchorOrigin={{ vertical: "top", horizontal: "right" }}
-            >
-              <Alert
-                onClose={() =>
-                  setSnackbar((prev) => ({ ...prev, open: false }))
-                }
-                severity={snackbar.severity}
-                variant="filled"
-                sx={{
-                  width: "100%",
-                  "& .MuiAlert-message": {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 2,
-                  },
-                }}
-              >
-                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                    {snackbar.message}
-                  </Typography>
-                </Box>
-              </Alert>
-            </Snackbar>
           </Box>
         </Paper>
 

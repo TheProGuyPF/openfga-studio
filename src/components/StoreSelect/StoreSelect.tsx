@@ -7,8 +7,7 @@ import {
   Dialog, 
   DialogTitle, 
   DialogContent, 
-  DialogActions, 
-  Alert, 
+  DialogActions,
   Select,
   MenuItem,
   FormControl,
@@ -16,6 +15,7 @@ import {
 } from '@mui/material';
 import { OpenFGAService } from '../../services/OpenFGAService';
 import { useEnvironment } from '../../contexts/EnvironmentContext';
+import { useToast } from '../../contexts/ToastContext';
 
 interface Store {
   id: string;
@@ -34,7 +34,7 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
   const { environment } = useEnvironment();
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
   const [internalCreateOpen, setInternalCreateOpen] = useState(false);
   // Controlled when the parent passes createOpen; otherwise self-managed.
   const isCreateDialogOpen = createOpen ?? internalCreateOpen;
@@ -47,7 +47,6 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
   const loadStores = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
       const storesList = await OpenFGAService.listStores();
       setStores(storesList);
 
@@ -69,12 +68,12 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
       }
     } catch (error) {
       console.error('Failed to load stores:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load stores. Please try again.');
+      toast(error instanceof Error ? error.message : 'Failed to load stores. Please try again.', 'error');
       setStores([]); // Ensure stores is always an array
     } finally {
       setLoading(false);
     }
-  }, [selectedStore, onStoreChange, environment.storeId]);
+  }, [selectedStore, onStoreChange, environment.storeId, toast]);
 
   useEffect(() => {
     loadStores();
@@ -85,14 +84,13 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
 
     try {
       setCreatingStore(true);
-      setError(null);
       await OpenFGAService.createStore(newStoreName.trim());
       setNewStoreName('');
       setCreateOpen(false);
       await loadStores(); // Reload stores after creating new one
     } catch (error) {
       console.error('Failed to create store:', error);
-      setError('Failed to create store. Please try again.');
+      toast('Failed to create store. Please try again.', 'error');
     } finally {
       setCreatingStore(false);
     }
@@ -119,22 +117,6 @@ export const StoreSelect = ({ selectedStore, onStoreChange, createOpen, onCreate
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 200 }}>
-        {error && (
-          <Alert 
-            severity="error" 
-            sx={{ 
-              position: 'fixed',
-              right: 16,
-              top: 72,
-              zIndex: 1400,
-              minWidth: 300,
-              boxShadow: (theme) => theme.shadows[3],
-            }}
-          >
-            {error}
-          </Alert>
-        )}
-        
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <Select

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Box, Paper, Button, IconButton, Snackbar, Alert } from '@mui/material';
+import { Box, Paper, Button, IconButton, Alert, CircularProgress } from '@mui/material';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -9,6 +9,7 @@ import { OpenFGAService } from '../../services/OpenFGAService';
 import { parseAuthModelToGraph } from '../../utils/authModelParser';
 import { dslToJson } from '../../utils/modelConverter';
 import { useRegisterDirty } from '../../contexts/DirtyStateContext';
+import { useToast } from '../../contexts/ToastContext';
 import type { Node, Edge, NodeChange, EdgeChange } from 'reactflow';
 import { applyNodeChanges, applyEdgeChanges } from 'reactflow';
 
@@ -25,14 +26,31 @@ export default function AuthModelTab({ storeId, storeName, initialModel, onModel
   const [edges, setEdges] = useState<Edge[]>([]);
   const [leftPanelExpanded, setLeftPanelExpanded] = useState(true);
   const [rightPanelExpanded, setRightPanelExpanded] = useState(true);
-  const [snackbar, setSnackbar] = useState<{
-    open: boolean;
-    message: string;
-    severity: 'success' | 'error';
-  }>({ open: false, message: '', severity: 'success' });
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
 
   // Track unsaved edits so the app can warn before refresh / tab / env switch.
   useRegisterDirty('auth-model', authModel !== initialModel);
+
+  // Live validation: parse the model (debounced) and surface errors inline
+  // instead of only failing silently in the graph / on save.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      if (!authModel.trim()) {
+        setModelError(null);
+        return;
+      }
+      try {
+        if (authModel.trim().startsWith('{')) JSON.parse(authModel);
+        else dslToJson(authModel);
+        setModelError(null);
+      } catch (error) {
+        setModelError(error instanceof Error ? error.message : 'Invalid authorization model');
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [authModel]);
 
   useEffect(() => {
     setAuthModel(initialModel);
@@ -65,53 +83,39 @@ export default function AuthModelTab({ storeId, storeName, initialModel, onModel
   };
 
   const handleSave = async () => {
+    setIsSaving(true);
     try {
       await OpenFGAService.writeAuthorizationModel(storeId, authModel);
       onModelUpdate(authModel);
-      setSnackbar({
-        open: true,
-        message: 'Authorization model saved successfully',
-        severity: 'success'
-      });
+      toast('Authorization model saved successfully', 'success');
     } catch (error) {
       console.error('Failed to save authorization model:', error);
-      setSnackbar({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to save authorization model',
-        severity: 'error'
-      });
+      toast(
+        error instanceof Error ? error.message : 'Failed to save authorization model',
+        'error',
+      );
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDownloadJSON = () => {
     try {
-      let jsonContent = authModel;
-      if (!authModel.startsWith('{')) {
-        // Convert DSL to JSON for download
-        const jsonModel = dslToJson(authModel);
-        jsonContent = JSON.stringify(jsonModel, null, 2);
-        const blob = new Blob([jsonContent], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'authorization-model.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        const blob = new Blob([jsonContent], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'authorization-model.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+      const jsonContent = authModel.trim().startsWith('{')
+        ? authModel
+        : JSON.stringify(dslToJson(authModel), null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'authorization-model.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Failed to download JSON:', error);
+      toast(error instanceof Error ? error.message : 'Failed to export model', 'error');
     }
   };
 
@@ -134,18 +138,29 @@ export default function AuthModelTab({ storeId, storeName, initialModel, onModel
         <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', gap: 1 }}>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Button variant="contained" onClick={handleSave}>
-                Save Model
+              <Button
+                variant="contained"
+                onClick={handleSave}
+                disabled={isSaving || Boolean(modelError)}
+                startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : undefined}
+              >
+                {isSaving ? 'Saving…' : 'Save Model'}
               </Button>
-              <Button 
-                variant="outlined" 
+              <Button
+                variant="outlined"
                 startIcon={<FileDownloadIcon />}
                 onClick={handleDownloadJSON}
+                disabled={Boolean(modelError)}
               >
               JSON
               </Button>
             </Box>
           </Box>
+          {modelError && (
+            <Alert severity="warning" sx={{ mb: 1 }}>
+              {modelError}
+            </Alert>
+          )}
           <Box sx={{ flexGrow: 1 }}>
             <AuthModelEditor value={authModel} onChange={handleAuthModelChange} />
           </Box>
@@ -198,21 +213,6 @@ export default function AuthModelTab({ storeId, storeName, initialModel, onModel
       >
         {rightPanelExpanded ? <ChevronRightIcon /> : <ChevronLeftIcon />}
       </IconButton>
-      <Snackbar 
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-      >
-        <Alert 
-          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} 
-          severity={snackbar.severity}
-          variant="filled"
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 };

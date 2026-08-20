@@ -6,7 +6,6 @@ import {
   Alert,
   ToggleButton,
   ToggleButtonGroup,
-  Snackbar,
   IconButton,
   Collapse,
   Chip,
@@ -18,6 +17,7 @@ import {
   type RelationshipMetadata,
 } from '../../utils/tupleHelper';
 import { formatMs } from '../../utils/latencyStats';
+import { useToast } from '../../contexts/ToastContext';
 import { useHistory } from '../../hooks/useHistory';
 import { HistoryPanel } from '../History/HistoryPanel';
 import { addHistoryEntry, type HistoryEntry } from '../../services/historyStore';
@@ -108,11 +108,7 @@ export default function LookupTab({
   const [loadingAll, setLoadingAll] = useState(false);
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{
-    open: boolean;
-    message: string;
-    severity: 'success' | 'error' | 'info';
-  }>({ open: false, message: '', severity: 'info' });
+  const { toast } = useToast();
   const [bannerOpen, setBannerOpen] = useState(() => {
     try {
       return sessionStorage.getItem(BANNER_DISMISS_KEY) !== '1';
@@ -152,10 +148,11 @@ export default function LookupTab({
     }
   };
 
-  const showSnack = (
-    message: string,
-    severity: 'success' | 'error' | 'info' = 'info'
-  ) => setSnackbar({ open: true, message, severity });
+  const showSnack = useCallback(
+    (message: string, severity: 'success' | 'error' | 'info' = 'info') =>
+      toast(message, severity),
+    [toast],
+  );
 
   const handleEffectiveSubmit = useCallback(async () => {
     setLoading(true);
@@ -218,7 +215,7 @@ export default function LookupTab({
     } finally {
       setLoading(false);
     }
-  }, [effectiveValues, storeId, authModelId]);
+  }, [effectiveValues, storeId, authModelId, showSnack]);
 
   const buildDirectFilters = useCallback(() => {
     const filters: { user?: string; relation?: string; object?: string } = {};
@@ -291,7 +288,7 @@ export default function LookupTab({
     } finally {
       setLoading(false);
     }
-  }, [buildDirectFilters, storeId, authModelId]);
+  }, [buildDirectFilters, storeId, authModelId, showSnack]);
 
   const handleReplayHistory = useCallback((entry: HistoryEntry) => {
     const splitUser = (u: string) => {
@@ -356,7 +353,7 @@ export default function LookupTab({
     } finally {
       setLoadingMore(false);
     }
-  }, [directResult, storeId]);
+  }, [directResult, storeId, showSnack]);
 
   const handleLoadAll = useCallback(async () => {
     if (!directResult?.continuationToken) return;
@@ -397,14 +394,14 @@ export default function LookupTab({
     } finally {
       setLoadingAll(false);
     }
-  }, [directResult, storeId]);
+  }, [directResult, storeId, showSnack]);
 
   const handleCopy = useCallback((text: string) => {
     navigator.clipboard
       .writeText(text)
       .then(() => showSnack('Copied to clipboard', 'success'))
       .catch(() => showSnack('Failed to copy', 'error'));
-  }, []);
+  }, [showSnack]);
 
   const crossMode = useMemo<CrossModeActions>(
     () => ({
@@ -442,7 +439,7 @@ export default function LookupTab({
         onCheckTupleInQueryTab({ user, relation, object });
       },
     }),
-    [onCheckTupleInQueryTab]
+    [onCheckTupleInQueryTab, showSnack]
   );
 
   return (
@@ -615,21 +612,6 @@ export default function LookupTab({
           />
         </Box>
 
-        <Snackbar
-          open={snackbar.open}
-          autoHideDuration={6000}
-          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
-          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-        >
-          <Alert
-            onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
-            severity={snackbar.severity}
-            variant="filled"
-            sx={{ width: '100%' }}
-          >
-            {snackbar.message}
-          </Alert>
-        </Snackbar>
       </Box>
     </Box>
   );

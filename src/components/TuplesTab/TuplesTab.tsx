@@ -1,30 +1,27 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Box, 
-  Paper, 
-  Button, 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableContainer, 
-  TableHead, 
-  TableRow, 
-  TextField, 
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  Box,
+  Paper,
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
   Autocomplete,
-  Alert, 
-  Snackbar,
   ToggleButton,
   ToggleButtonGroup,
   Typography,
-  Slide,
   alpha,
   Select,
   MenuItem,
-  type SlideProps
 } from '@mui/material';
 import { OpenFGAService } from '../../services/OpenFGAService';
 import { extractRelationshipMetadata, type RelationshipMetadata, type RelationshipTuple } from '../../utils/tupleHelper';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { useToast } from '../../contexts/ToastContext';
 
 interface TuplesTabProps {
   storeId: string;
@@ -59,15 +56,16 @@ interface ConditionState {
   context: Record<string, string | number | boolean>;
 }
 
-// Slide transition component for the error toast
-function SlideTransition(props: SlideProps) {
-  return <Slide {...props} direction="left" />;
-}
-
 export default function TuplesTab({ storeId, currentModel, authModelId }: TuplesTabProps) {
   const [tuples, setTuples] = useState<RelationshipTuple[]>([]);
   const [metadata, setMetadata] = useState<RelationshipMetadata | undefined>();
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const { toast } = useToast();
+  const notify = useCallback(
+    (n: { message: string; type: 'success' | 'error' } | null) => {
+      if (n) toast(n.message, n.type);
+    },
+    [toast],
+  );
   const [mode, setMode] = useState<'assisted' | 'freeform'>('assisted');
   const [loading, setLoading] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<RelationshipTuple | null>(null);
@@ -164,7 +162,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
         }
       } catch (error) {
         console.error('Failed to load data:', error);
-        setNotification({
+        notify({
           message: 'Failed to load tuples. Please try again.',
           type: 'error'
         });
@@ -174,7 +172,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
     };
 
     loadData();
-  }, [storeId, currentModel, pageSize]);
+  }, [storeId, currentModel, pageSize, notify]);
 
   // Render condition parameters UI
   const renderConditionFields = () => {
@@ -219,7 +217,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
 
   const handleAssistedSubmit = async () => {
     try {
-      setNotification(null);
+      notify(null);
       setLoading(true);
       
       if (!relation) {
@@ -251,7 +249,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
       setTuples(response.tuples);
       setContinuationToken(response.continuation_token);
 
-      setNotification({
+      notify({
         message: `Successfully added tuple: ${formattedUser} ${relation.id} ${formattedObject}`,
         type: 'success'
       });
@@ -259,7 +257,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
       console.error('Failed to write tuple:', error);
       const apiError = error as ApiError;
       const errorMessage = apiError.response?.data?.message || apiError.message || 'Failed to add tuple';
-      setNotification({
+      notify({
         message: errorMessage,
         type: 'error'
       });
@@ -282,13 +280,13 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
             !(t.user === tuple.user && t.relation === tuple.relation && t.object === tuple.object),
         ),
       );
-      setNotification({
+      notify({
         message: `Successfully deleted tuple: ${tuple.user} ${tuple.relation} ${tuple.object}`,
         type: 'success',
       });
     } catch (error) {
       console.error('Failed to delete tuple:', error);
-      setNotification({ message: 'Failed to delete tuple', type: 'error' });
+      notify({ message: 'Failed to delete tuple', type: 'error' });
     } finally {
       setDeleting(false);
       setPendingDelete(null);
@@ -297,7 +295,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
 
   const handleFreeformSubmit = async () => {
     try {
-      setNotification(null);
+      notify(null);
       setLoading(true);
 
       // Parse freeform condition if provided
@@ -330,13 +328,13 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
       setTuples(response.tuples);
       setContinuationToken(response.continuation_token);
 
-      setNotification({
+      notify({
         message: `Successfully added tuple: ${freeformUser} ${freeformRelation} ${freeformObject}`,
         type: 'success'
       });
     } catch (error) {
       console.error('Failed to write tuple:', error);
-      setNotification({
+      notify({
         message: error instanceof Error ? error.message : 'Failed to add tuple',
         type: 'error'
       });
@@ -739,7 +737,7 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
                           setContinuationToken(response.continuation_token);
                         } catch (error) {
                           console.error('Failed to load more tuples:', error);
-                          setNotification({ message: 'Failed to load more tuples', type: 'error' });
+                          notify({ message: 'Failed to load more tuples', type: 'error' });
                         } finally {
                           setLoadingMore(false);
                         }
@@ -754,29 +752,6 @@ export default function TuplesTab({ storeId, currentModel, authModelId }: Tuples
             </Table>
           </TableContainer>
         </Paper>
-
-        <Snackbar 
-          open={!!notification} 
-          autoHideDuration={10000}
-          onClose={() => setNotification(null)}
-          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-          TransitionComponent={SlideTransition}
-          sx={{
-            '& .MuiPaper-root': {
-              maxWidth: '600px',
-              minWidth: '400px'
-            }
-          }}
-        >
-          <Alert 
-            onClose={() => setNotification(null)} 
-            severity={notification?.type || 'info'}
-            variant="filled"
-            sx={{ width: '100%' }}
-          >
-            {notification?.message}
-          </Alert>
-        </Snackbar>
 
         <ConfirmDialog
           open={!!pendingDelete}
