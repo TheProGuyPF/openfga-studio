@@ -157,7 +157,30 @@ export interface BatchCheckItemResult {
   error?: string;
 }
 
+export type HealthStatus = 'serving' | 'unhealthy' | 'unknown';
+
 export class OpenFGAService {
+  /**
+   * Probe the OpenFGA server's `/healthz` endpoint. Uses a plain fetch (not the
+   * authenticated `api` instance) so it reflects raw reachability even when the
+   * token flow fails. `/healthz` is unauthenticated and returns `{status:"SERVING"}`.
+   * Note: OpenFGA does not expose its build version over the API — only health.
+   */
+  static async getHealth(signal?: AbortSignal): Promise<HealthStatus> {
+    try {
+      const base = getCurrentEnvironment().apiUrl || '/api';
+      const res = await fetch(`${base.replace(/\/$/, '')}/healthz`, {
+        headers: { Accept: 'application/json' },
+        signal,
+      });
+      if (!res.ok) return 'unhealthy';
+      const data = (await res.json().catch(() => null)) as { status?: string } | null;
+      return data?.status === 'SERVING' ? 'serving' : 'unhealthy';
+    } catch {
+      return 'unknown';
+    }
+  }
+
   static async createStore(name: string): Promise<{ id: string; name: string }> {
     try {
       const response = await api.post('/stores', { name });

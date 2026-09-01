@@ -5,9 +5,10 @@ import { useTheme } from '@mui/material';
 interface AuthModelEditorProps {
   value: string;
   onChange: (value: string) => void;
+  readOnly?: boolean;
 }
 
-export const AuthModelEditor = ({ value, onChange }: AuthModelEditorProps) => {
+export const AuthModelEditor = ({ value, onChange, readOnly = false }: AuthModelEditorProps) => {
   const theme = useTheme();
 
   useEffect(() => {
@@ -35,7 +36,9 @@ export const AuthModelEditor = ({ value, onChange }: AuthModelEditorProps) => {
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           fontSize: 14,
-          wordWrap: 'on'
+          wordWrap: 'on',
+          readOnly,
+          domReadOnly: readOnly,
         }}
       />
     </div>

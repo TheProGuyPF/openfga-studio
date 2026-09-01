@@ -21,6 +21,14 @@ import { useToast } from "../../contexts/ToastContext";
 import { useHistory } from "../../hooks/useHistory";
 import { HistoryPanel } from "../History/HistoryPanel";
 import { addHistoryEntry, type HistoryEntry } from "../../services/historyStore";
+import { ResolutionTree } from "./ResolutionTree";
+import { buildStructuredModel } from "../../utils/modelGraph";
+
+interface LastCheck {
+  params: { user: string; object: string; relation: string };
+  context?: Record<string, string | number | boolean>;
+  allowed: boolean;
+}
 
 interface PendingPrefill {
   user: string;
@@ -81,7 +89,18 @@ function QueryTab({
     null
   );
   const [conversionWarning, setConversionWarning] = useState<string | null>(null);
+  const [lastCheck, setLastCheck] = useState<LastCheck | null>(null);
   const { toast } = useToast();
+
+  // Structured model for the resolution-path visualiser (built from the DSL/JSON).
+  const structuredModel = useMemo(() => {
+    if (!currentModel) return null;
+    try {
+      return buildStructuredModel(currentModel);
+    } catch {
+      return null;
+    }
+  }, [currentModel]);
 
   // Available types from metadata
   const availableTypes = useMemo(
@@ -139,6 +158,7 @@ function QueryTab({
         setSelectedObjectType("");
         setError(null);
         setConditionState(null);
+        setLastCheck(null);
       } catch (error) {
         console.error("Failed to extract relationship metadata:", error);
         setError("Failed to parse authorization model");
@@ -419,6 +439,12 @@ function QueryTab({
 
       toast(result ? "Access Allowed" : "Access Denied", result ? "success" : "error");
 
+      setLastCheck({
+        params: { user: query.user, object: query.object, relation: query.relation },
+        context: query.condition?.context,
+        allowed: result,
+      });
+
       addHistoryEntry({
         op: "check",
         storeId,
@@ -446,6 +472,7 @@ function QueryTab({
       console.error("Query check failed:", err);
       const errorMessage = err instanceof Error ? err.message : "Failed to check access";
       setError(errorMessage);
+      setLastCheck(null);
       toast(errorMessage, "error");
       if (query) {
         addHistoryEntry({
@@ -887,6 +914,18 @@ function QueryTab({
             )}
           </Box>
         </Paper>
+
+        {/* Resolution path for the most recent check */}
+        {lastCheck && structuredModel && (
+          <ResolutionTree
+            storeId={storeId}
+            authModelId={authModelId}
+            model={structuredModel}
+            params={lastCheck.params}
+            context={lastCheck.context}
+            allowed={lastCheck.allowed}
+          />
+        )}
 
         {/* Check history (persistent, per environment + store) */}
         <HistoryPanel

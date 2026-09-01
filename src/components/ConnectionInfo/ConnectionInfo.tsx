@@ -1,14 +1,26 @@
-import { useState, useCallback, type MouseEvent } from 'react';
+import { useState, useCallback, useEffect, type MouseEvent } from 'react';
 import {
   IconButton,
   Popover,
   Box,
   Typography,
   Tooltip,
+  Chip,
+  CircularProgress,
 } from '@mui/material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useEnvironment } from '../../contexts/EnvironmentContext';
+import { OpenFGAService, type HealthStatus } from '../../services/OpenFGAService';
+
+type HealthState = 'checking' | HealthStatus;
+
+const HEALTH_DISPLAY: Record<HealthState, { label: string; color: 'success' | 'error' | 'default' }> = {
+  checking: { label: 'Checking…', color: 'default' },
+  serving: { label: 'Serving', color: 'success' },
+  unhealthy: { label: 'Unhealthy', color: 'error' },
+  unknown: { label: 'Unreachable', color: 'error' },
+};
 
 interface ConnectionInfoProps {
   storeId: string;
@@ -68,6 +80,7 @@ function InfoRow({ label, value }: InfoRowProps) {
 export const ConnectionInfo = ({ storeId, storeName, authModelId }: ConnectionInfoProps) => {
   const { environment } = useEnvironment();
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const [health, setHealth] = useState<HealthState>('checking');
 
   const handleOpen = (event: MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
@@ -78,6 +91,19 @@ export const ConnectionInfo = ({ storeId, storeName, authModelId }: ConnectionIn
   };
 
   const open = Boolean(anchorEl);
+
+  // Probe server health each time the popover opens.
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setHealth('checking');
+    OpenFGAService.getHealth(controller.signal).then((status) => {
+      if (!controller.signal.aborted) setHealth(status);
+    });
+    return () => controller.abort();
+  }, [open]);
+
+  const healthDisplay = HEALTH_DISPLAY[health];
 
   return (
     <>
@@ -99,6 +125,19 @@ export const ConnectionInfo = ({ storeId, storeName, authModelId }: ConnectionIn
         }}
       >
         <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Connection Details</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+            Server health
+          </Typography>
+          <Chip
+            size="small"
+            label={healthDisplay.label}
+            color={healthDisplay.color}
+            variant={health === 'serving' ? 'filled' : 'outlined'}
+            icon={health === 'checking' ? <CircularProgress size={12} sx={{ ml: 0.5 }} /> : undefined}
+            sx={{ fontWeight: 600 }}
+          />
+        </Box>
         <InfoRow label="Environment" value={environment.label} />
         <InfoRow label="API URL" value={environment.apiUrl} />
         <InfoRow label="Store Name" value={storeName} />
