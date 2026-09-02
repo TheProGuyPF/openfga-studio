@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
   Box,
-  Paper,
   Typography,
   Button,
   Stack,
@@ -17,6 +16,7 @@ import {
   Collapse,
 } from '@mui/material';
 import ScienceIcon from '@mui/icons-material/Science';
+import { SectionAccordion } from './SectionAccordion';
 import { parseTupleObject } from '../../utils/tupleHelper';
 import { transformRow, type MigrationTemplate, type TransformResult, type Tuple } from '../../utils/migrationTransform';
 import type { TupleWarning } from '../../utils/migrationModelCheck';
@@ -87,14 +87,11 @@ export function DryRunSummary({
 
   if (!result || !template) {
     return (
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          3. Dry run
-        </Typography>
+      <SectionAccordion title="3. Dry run" defaultExpanded={false}>
         <Typography variant="body2" color="text.secondary">
           Load a CSV and a valid template to preview the migration.
         </Typography>
-      </Paper>
+      </SectionAccordion>
     );
   }
 
@@ -109,11 +106,11 @@ export function DryRunSummary({
   ];
 
   return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        3. Dry run
-      </Typography>
-
+    <SectionAccordion
+      title="3. Dry run"
+      defaultExpanded={false}
+      summary={<Chip size="small" color="primary" variant="outlined" label={`${stats.produced.toLocaleString()} tuples`} />}
+    >
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
         <Chip color="primary" label={`${stats.produced.toLocaleString()} tuples`} />
         <Chip variant="outlined" label={`${stats.totalRows.toLocaleString()} rows`} />
@@ -267,6 +264,6 @@ export function DryRunSummary({
           </Typography>
         )}
       </Box>
-    </Paper>
+    </SectionAccordion>
   );
 }

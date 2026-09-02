@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import {
   Box,
-  Paper,
   Typography,
   Button,
   TextField,
@@ -14,6 +13,7 @@ import {
   TableBody,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import { SectionAccordion } from './SectionAccordion';
 
 interface SourcePickerProps {
   csvText: string;
@@ -37,10 +37,19 @@ export function SourcePicker({ csvText, onCsvChange, csvName, headers, rows }: S
   const sample = rows.slice(0, 5);
 
   return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        1. Source CSV
-      </Typography>
+    <SectionAccordion
+      title="1. Source CSV"
+      defaultExpanded
+      summary={
+        rows.length > 0 ? (
+          <Chip
+            size="small"
+            variant="outlined"
+            label={`${rows.length.toLocaleString()} row${rows.length === 1 ? '' : 's'} · ${headers.length} col${headers.length === 1 ? '' : 's'}`}
+          />
+        ) : undefined
+      }
+    >
       <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="center" flexWrap="wrap">
         <Button
           variant="outlined"
@@ -136,6 +145,6 @@ export function SourcePicker({ csvText, onCsvChange, csvName, headers, rows }: S
           </Table>
         </Box>
       )}
-    </Paper>
+    </SectionAccordion>
   );
 }

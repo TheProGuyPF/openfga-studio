@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
   Box,
-  Paper,
   Typography,
   Button,
   Stack,
@@ -14,6 +13,7 @@ import {
   LinearProgress,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { SectionAccordion } from './SectionAccordion';
 import UndoIcon from '@mui/icons-material/Undo';
 import ReplayIcon from '@mui/icons-material/Replay';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -89,23 +89,21 @@ export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistory
 
   if (runs.length === 0) {
     return (
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          Run history
-        </Typography>
+      <SectionAccordion title="Run history" defaultExpanded={false}>
         <Typography variant="body2" color="text.secondary">
           No past runs for this store. Applied runs are recorded here (durable across reloads) so you can roll them back
           or retry failures.
         </Typography>
-      </Paper>
+      </SectionAccordion>
     );
   }
 
   return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        Run history
-      </Typography>
+    <SectionAccordion
+      title="Run history"
+      defaultExpanded={false}
+      summary={<Chip size="small" variant="outlined" label={`${runs.length} run${runs.length === 1 ? '' : 's'}`} />}
+    >
       {runs.map((run) => (
         <Accordion key={run.id} disableGutters>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -190,6 +188,6 @@ export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistory
           </AccordionDetails>
         </Accordion>
       ))}
-    </Paper>
+    </SectionAccordion>
   );
 }

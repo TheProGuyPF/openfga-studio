@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import {
   Box,
-  Paper,
   Typography,
   Button,
   Stack,
@@ -18,6 +17,7 @@ import {
   ListItemText,
   ToggleButton,
   ToggleButtonGroup,
+  Collapse,
   useTheme,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -27,6 +27,9 @@ import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import DataObjectIcon from '@mui/icons-material/DataObject';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import { SectionAccordion } from './SectionAccordion';
 import { MIGRATION_TEMPLATE_SCHEMA, describeRule } from '../../utils/migrationSchema';
 import type { MigrationTemplate, Tuple } from '../../utils/migrationTransform';
 import type { SavedTemplate } from './types';
@@ -72,6 +75,8 @@ export function MappingEditor({
   const theme = useTheme();
   const importRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<'builder' | 'json'>('builder');
+  // Live preview starts minimised so the builder has room and reads uncluttered.
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // The Builder edits the SAME config as the JSON editor. Derive a well-formed
   // working template from the current text; null means the JSON can't be parsed,
@@ -127,11 +132,17 @@ export function MappingEditor({
   };
 
   return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        2. Mapping template
-      </Typography>
-
+    <SectionAccordion
+      title="2. Mapping template"
+      defaultExpanded
+      summary={
+        errors.length > 0 ? (
+          <Chip size="small" color="warning" variant="outlined" label={`${errors.length} issue${errors.length === 1 ? '' : 's'}`} />
+        ) : template ? (
+          <Chip size="small" color="success" variant="outlined" label={`${producedCount.toLocaleString()} tuple${producedCount === 1 ? '' : 's'}`} />
+        ) : undefined
+      }
+    >
       <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap alignItems="center">
         <ToggleButtonGroup
           exclusive
@@ -267,43 +278,54 @@ export function MappingEditor({
           )}
         </Box>
 
-        <Box sx={{ flex: '1 1 360px', minWidth: 300 }}>
-          {view === 'json' && template && (
-            <>
-              <Typography variant="subtitle2" gutterBottom>
-                What this template does
-              </Typography>
-              <List dense sx={{ mb: 1 }}>
-                {template.rules.map((rule) => (
-                  <ListItem key={rule.id} sx={{ display: 'list-item', py: 0.25 }}>
-                    <ListItemText
-                      primaryTypographyProps={{ variant: 'body2' }}
-                      primary={describeRule(rule)}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </>
-          )}
-
-          <Typography variant="subtitle2" gutterBottom>
-            Live preview {previewTuples.length > 0 && `(first ${previewTuples.length})`}
-          </Typography>
-          {previewTuples.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No tuples yet — load a CSV and a valid template.
+        <Box sx={{ flex: previewOpen ? '1 1 340px' : '0 0 auto', minWidth: previewOpen ? 300 : 0 }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={0.5}
+            onClick={() => setPreviewOpen((o) => !o)}
+            sx={{ cursor: 'pointer', userSelect: 'none' }}
+          >
+            <IconButton size="small" aria-label={previewOpen ? 'Minimise live preview' : 'Expand live preview'}>
+              {previewOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+            </IconButton>
+            <Typography variant="subtitle2">
+              Live preview{producedCount > 0 ? ` (${producedCount.toLocaleString()})` : ''}
             </Typography>
-          ) : (
-            <Stack spacing={0.5}>
-              {previewTuples.map((t, i) => (
-                <Box key={i} sx={{ fontFamily: 'monospace', fontSize: 12, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                  <Chip size="small" label={t.user} variant="outlined" />
-                  <Chip size="small" label={t.relation} color="primary" variant="outlined" />
-                  <Chip size="small" label={t.object} variant="outlined" />
-                </Box>
-              ))}
-            </Stack>
-          )}
+          </Stack>
+          <Collapse in={previewOpen} unmountOnExit>
+            <Box sx={{ pt: 0.5 }}>
+              {view === 'json' && template && (
+                <>
+                  <Typography variant="subtitle2" gutterBottom>
+                    What this template does
+                  </Typography>
+                  <List dense sx={{ mb: 1 }}>
+                    {template.rules.map((rule) => (
+                      <ListItem key={rule.id} sx={{ display: 'list-item', py: 0.25 }}>
+                        <ListItemText primaryTypographyProps={{ variant: 'body2' }} primary={describeRule(rule)} />
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+              {previewTuples.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No tuples yet — load a CSV and a valid template.
+                </Typography>
+              ) : (
+                <Stack spacing={0.5}>
+                  {previewTuples.map((t, i) => (
+                    <Box key={i} sx={{ fontFamily: 'monospace', fontSize: 12, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      <Chip size="small" label={t.user} variant="outlined" />
+                      <Chip size="small" label={t.relation} color="primary" variant="outlined" />
+                      <Chip size="small" label={t.object} variant="outlined" />
+                    </Box>
+                  ))}
+                </Stack>
+              )}
+            </Box>
+          </Collapse>
         </Box>
       </Box>
 
@@ -312,6 +334,6 @@ export function MappingEditor({
           Tip: paste a CSV above first so the AI prompt and validation can see your column names.
         </Typography>
       )}
-    </Paper>
+    </SectionAccordion>
   );
 }
