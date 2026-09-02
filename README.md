@@ -1,234 +1,203 @@
-# OpenFGA Studio: An Open Source Authorization Modeling Interface
+# OpenFGA Studio
 
-## Understanding OpenFGA
+A web UI for **designing, visualising, testing, and operating [OpenFGA](https://openfga.dev) authorization models**. OpenFGA Studio gives you a model editor with live validation, an interactive relationship graph, access-check tooling that shows *why* a decision was made, latency benchmarking, and multi-environment connection management — all in the browser.
 
-OpenFGA (Fine-Grained Authorization) is a high-performance authorization engine built for developers and inspired by Google's Zanzibar paper. It excels in handling complex authorization scenarios with features that make it stand out:
+Built with React 19, TypeScript, Vite, Material UI, React Flow, and the OpenFGA HTTP API.
 
-- **Relationship-Based Authorization**: Model complex access patterns through relationships
-- **High Performance**: Process millions of authorization checks per second
-- **Flexibility**: Support for RBAC, ABAC, and ReBAC models
-- **Time-Based Access**: Define temporal access rules with built-in support
-- **Proven Architecture**: Based on Google's battle-tested Zanzibar system
+![OpenFGA Studio — dark mode](screenshots/0-screenshot.png)
+![OpenFGA Studio — light mode](screenshots/0-screenshot-light-mode.png)
 
-While OpenFGA Playground provides a [hosted application](https://play.fga.dev/sandbox/) for experimentation, it comes with limitations:
-- Not open source
-- Cannot be deployed in air-gapped environments
-- Limited customization options
-- Dependency on external services
+> Some screenshots predate the latest model-graph and resolution-path redesigns; the workflows they show are otherwise current.
 
-## Why This Project?
+---
 
-I built OpenFGA Studio to address these limitations and provide:
-- A fully open-source solution deployable anywhere
-- Enhanced user experience for authorization modeling
-- Complete control over your authorization data
-- Customizable interface for specific needs
-- Seamless integration with existing systems
+## Contents
+- [What you can do](#what-you-can-do)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+- [Configuration & environments](#configuration--environments)
+- [Running with Docker](#running-with-docker)
+- [Data migration scripts](#data-migration-scripts)
+- [Project structure](#project-structure)
+- [Development & testing](#development--testing)
+- [License & credits](#license--credits)
 
-OpenFGA Studio streamlines the process of creating, testing, and managing authorization models, making complex authorization logic more accessible and manageable. Built with modern web technologies including React, TypeScript, and Material-UI, it provides a robust and intuitive interface for working with OpenFGA.
+---
 
-![OpenFGA Studio Dark Mode](screenshots/0-screenshot.png)
-![OpenFGA Studio Light Mode](screenshots/0-screenshot-light-mode.png)
+## What you can do
 
-## Development
+The app is organised into tabs, all scoped to the currently selected **environment** and **store**.
 
-👉 For detailed development instructions, see [DEVELOPMENT.md](DEVELOPMENT.md)
+### Authorization Model
+- **Monaco editor** for the model in DSL or JSON, with live parsing/validation and inline errors.
+- **Read-only by default for live-store models** — click **Unlock to edit**; saving prompts a **confirmation dialog** showing the target store, environment, tier, and a change summary. Unlock re-locks when you switch store/environment.
+- **Interactive, force-directed graph** of the model:
+  - Type and relation nodes; directly-assignable types render as **chips** on the relation (no shared-`user` hub clutter); edges show computed usersets, `X from Y` (tuple-to-userset), and direct references.
+  - **Click-to-focus** (highlight a node's neighbourhood), **search**, hover tooltips, **minimap**, an **outline sidebar**, **collapsible type groups** (collapsed by default for large models), a **re-arrange** control, and PNG export.
+- **Weighted-graph mode** — static performance insight inspired by [`openfga/model-visualizer`](https://github.com/openfga/model-visualizer): per-terminal-type worst-case weights (a direct assignment costs 1, each userset/tuple-to-userset hop adds 1, `or`/`and`/`but not` take the max, recursion is ∞), a colour scale, a per-type selector, and a "heaviest relations" table to spot hotspots.
 
-## Key Features
+### Tuples
+- Add relationship tuples in **assisted** mode (model-driven type/relation/object pickers, condition parameters) or **freeform** mode (raw tuple / JSON condition).
+- Browse existing tuples with pagination and delete with confirmation.
 
-### 1. Store Management
-The interface provides a straightforward way for managing OpenFGA stores. You can:
-- Create new authorization stores
-- Switch between existing stores
-- View and manage store configurations
-- Track model versions and changes
+### Query (Validate Access)
+- Run **checks** (`is user:X related to object:Y as relation?`) via a form or natural-language/JSON freeform input.
+- **Resolution-path visualiser** — because OpenFGA's Check returns only a boolean, the app reconstructs *why*: it walks the model's rewrite tree, using batched checks for same-object branches and tuple reads to traverse `X from Y` edges. View it as a **playground-style tree diagram** or an **indented list**, toggle between the **ACL path** (minimal satisfying path) and the **full tree**, search nodes, and see **allowed *and* denied** explanations. Results are cached briefly with a "Cached" badge and a Refresh to re-run live.
+- Persistent, per-store **check history** with replay.
 
-![Store Creation Interface](screenshots/1-create-store.png)
+### Lookup
+- **List objects** a user can access (effective access) and **read** direct tuples, with persistent history.
 
-### 2. Visual Authorization Model Editor
-The model editor is a powerful interface for defining authorization rules with features including:
-- Syntax highlighting for better readability
-- Real-time validation against OpenFGA schema
-- Support for both DSL and JSON formats
-- Error highlighting and suggestions
-- Easy switching between model versions
+### Benchmark
+- Measure check / list-objects **latency** (cold vs warm cache), seed a benchmark store, and view results — useful for spotting the network-vs-model cost split.
 
-### 3. Interactive Graph Visualization
-Understand your authorization model at a glance with:
-- Visual representation of relationships between types
-- Interactive node exploration
-- Relationship flow visualization
-- Dynamic updates as you modify the model
-- Zoom and pan controls for large models
+### Across the app
+- **Multi-environment switching** with tier-aware guards (non-prod / canary / production): a persistent banner and confirm-on-switch for guarded tiers.
+- **Connection details** popover with a **live server-health** indicator (`/healthz`), plus store/model IDs.
+- A passive **latency monitor**, deep-linkable tabs (`?tab=…`, `?store=…`), and dark/light themes.
 
-### 4. Advanced Tuple Management
-The tuple management interface makes it easy to define and manage relationships:
+---
 
-![Adding Basic Tuple](screenshots/2-adding-tuple.png)
+## Tech stack
 
-- Assisted tuple creation with type suggestions
-- Support for direct (freeform) tuple input
-- Batch operations for efficient management
-- Reverse chronological listing of tuples
-- Quick delete operations
+| Area | Choice |
+|------|--------|
+| UI | React 19 + TypeScript, Material UI 7 (+ Emotion) |
+| Build/dev | Vite 6 |
+| Editor | Monaco (`@monaco-editor/react`) |
+| Graphs | React Flow + `d3-force` |
+| Charts | Recharts |
+| Model parsing | `@openfga/syntax-transformer` (DSL ⇄ JSON) |
+| API | OpenFGA HTTP API via Axios |
+| Tests | Vitest |
 
-### 5. Conditional Relationship Support
-Handle complex authorization scenarios with conditional relationships:
+---
 
-![Adding Tuple with Conditions](screenshots/3-adding-tuple-with-condition.png)
+## Getting started
 
-- Dynamic condition parameter inputs
-- Type-aware parameter validation
-- Timestamp and duration support
-- Visual feedback for condition state
+### Prerequisites
+- **Node.js 20+** (CI builds on Node 24).
+- Access to an **OpenFGA server** — either a local instance or a configured environment (see below).
 
-### 6. Comprehensive Query Testing
-Test your authorization rules with an intuitive interface:
+> If your organisation installs npm packages from a private registry, make sure your registry auth is current before `npm install` (a stale token typically shows up as `E401`).
 
-![Basic Access Validation](screenshots/4-validate-access.png)
-
-Features include:
-- Visual query builder
-- Direct query input support
-- Real-time query validation
-- Historical query tracking
-- Quick query replay
-
-### 7. Conditional Access Testing
-Test complex conditional access patterns:
-
-![Conditional Access Validation](screenshots/5-validate-access-with-condition.png)
-
-- Test time-based access rules
-- Validate contextual conditions
-- Dynamic parameter inputs
-- Clear success/failure indicators
-
-### 8. Developer-Friendly Features
-OpenFGA Studio is built with developers in mind:
-- Clean, modern UI with dark mode support
-- Keyboard shortcuts for common operations
-- Copy/paste support for all fields
-- Detailed error messages
-- Response timing information
-
-## Technical Implementation
-
-OpenFGA Studio is built with modern web technologies:
-- **Frontend**: React with TypeScript for type safety
-- **UI Framework**: Material-UI for consistent, responsive design
-- **State Management**: React hooks and context for efficient state handling
-- **Build Tool**: Vite for fast development and optimized production builds
-- **API Integration**: Axios for reliable API communication
-- **Graph Visualization**: React Flow for interactive model visualization
-
-## Common Use Cases
-
-1. **Authorization Modeling**
-   - Design role-based access control (RBAC) systems
-   - Implement attribute-based access control (ABAC)
-   - Model relationship-based authorization
-
-2. **Testing and Validation**
-   - Verify access control rules
-   - Test time-based permissions
-   - Validate complex conditional access
-
-3. **Development and Debugging**
-   - Debug authorization issues
-   - Prototype authorization models
-   - Document access control patterns
-
-## Conclusion
-
-OpenFGA Studio simplifies the complex task of fine-grained authorization modeling and testing. Whether you're designing a new authorization system or maintaining an existing one, this tool provides the features needed to work efficiently with OpenFGA.
-
-The combination of visual tools, intuitive interfaces, and powerful testing capabilities makes it an essential tool for developers working with authorization systems. The tool continues to evolve with new features and improvements based on community feedback and real-world usage patterns.
-
-## Running the image and examples
-
-### 1. Default (Embedded OpenFGA)
-The container starts an embedded OpenFGA instance by default. This is perfect for local development or quick testing.
-
+### Install & run (local dev)
 ```bash
-# UI available at http://localhost:3000
-# Embedded OpenFGA HTTP API at http://localhost:8080
-# Embedded OpenFGA gRPC at localhost:8081
-docker run -p 3000:3000 -p 8080:8080 -p 8081:8081 ghcr.io/prakashm88/openfga-studio
+npm install
+
+# copy the env template and fill in at least the default (NPE-XUS) environment
+cp .env.example .env
+
+npm run dev          # Vite dev server on http://localhost:5173
 ```
 
-### 2. External OpenFGA (Production/Integration)
-You can point the Studio to an existing OpenFGA instance (e.g., OpenFGA Cloud, Render, or another container). There are two ways to configure this:
-
-#### Option A: Using `OPENFGA_ENDPOINT` (Recommended)
-Simply provide the full URL to your OpenFGA API. This handles scheme, host, port, and path prefixes automatically.
-
+### Point the default environment at a local OpenFGA
+Run an OpenFGA server locally:
 ```bash
-# Example: Connecting to a hosted instance with a path prefix
-docker run -p 3000:3000 \
-  -e OPENFGA_ENDPOINT=https://openfga-studio.onrender.com/api \
-  ghcr.io/prakashm88/openfga-studio
+# see https://github.com/openfga/openfga/releases
+./openfga run --http-addr 0.0.0.0:8080 --grpc-addr 0.0.0.0:8081
+```
+Then set the default environment's API URL in `.env`:
+```bash
+VITE_OPENFGA_API_URL_NPE_XUS=http://localhost:8080
+```
+Reload the dev server and pick **NPE-XUS** in the environment selector.
+
+### Other scripts
+```bash
+npm run build        # type-check (tsc -b) + production build to dist/
+npm run preview      # serve the production build locally
+npm run lint         # ESLint
+npm test             # Vitest (parser, weight algorithm, resolution engine)
 ```
 
-#### Option B: Using Individual Components
-You can also configure the connection using specific environment variables.
+---
+
+## Configuration & environments
+
+OpenFGA Studio ships with several **named environments** you switch between from the UI (defined in [`src/environments.ts`](src/environments.ts)), each tagged with a **tier**: `nonprod`, `canary`, or `prod`. Guarded tiers (canary/prod) get a persistent banner, confirm-on-switch, and the read-only-until-unlocked model editor.
+
+Configuration lives in `.env` (git-ignored; see [`.env.example`](.env.example) for the full template). Each environment has two kinds of values:
+
+- **Non-secret** (`VITE_*`, inlined into the client bundle at build time):
+  - `VITE_OPENFGA_API_URL_<ENV>` — the OpenFGA HTTP API base URL
+  - `VITE_OPENFGA_STORE_ID_<ENV>` — the default store for that environment
+  - `VITE_TOKEN_SERVICE_AUDIENCE_<ENV>` — token audience
+- **Secret** (non-`VITE_`, read **only** by the server-side proxy and **never** shipped to the browser):
+  - `TOKEN_SERVICE_URL_<ENV>` and `FGA_X2S_TOKEN_<ENV>`
+
+`<ENV>` is one of `NPE_XUS`, `CAN_US`, `XUS`, `XEU`.
+
+### How authentication works
+The app never holds long-lived credentials in the browser. When a request needs a token, the UI calls a same-origin route `/token-service/<env>`; the **proxy** (Vite in dev, nginx in the container) injects the secret X2S credential as the `Authorization` header and forwards it to the real token service, returning a short-lived bearer token. Tokens are refreshed automatically on `401`. An optional `VITE_OPENFGA_API_TOKEN` can supply a manual token override (lowest priority; usually blank).
+
+> Keep real environment values out of version control — `.env` and `.env.prod` are git-ignored. Do not paste production URLs or credentials into commits, issues, or this README.
+
+---
+
+## Running with Docker
+
+The container is a multi-stage build (Node build → nginx runtime) that bundles an embedded OpenFGA binary, so it can run standalone or point at an external OpenFGA. It exposes **3000** (UI), **8080** (OpenFGA HTTP), and **8081** (gRPC).
 
 ```bash
-docker run -p 3000:3000 \
-  -e OPENFGA_SCHEME=https \
-  -e OPENFGA_HOST=openfga-studio.onrender.com \
-  -e OPENFGA_PATH_PREFIX=api \
-  ghcr.io/prakashm88/openfga-studio
+# build locally
+docker build -t openfga-studio .
+
+# 1) Default: embedded OpenFGA (great for a quick local try)
+docker run -p 3000:3000 -p 8080:8080 -p 8081:8081 openfga-studio
+#   UI:            http://localhost:3000
+#   OpenFGA HTTP:  http://localhost:8080
+
+# 2) External OpenFGA — point at an existing instance
+docker run -p 3000:3000 -e OPENFGA_ENDPOINT=https://your-openfga.example.com/api openfga-studio
 ```
 
-**Available Variables:**
-- `OPENFGA_ENDPOINT`: Full URL (e.g., `https://api.example.com/v1`). Takes precedence if set.
-- `OPENFGA_HOST`: Hostname (e.g., `api.example.com`).
-- `OPENFGA_SCHEME`: `http` or `https` (default: `http`).
-- `OPENFGA_HTTP_PORT`: Port number (default: `80` for http, `443` for https, or `8080` for localhost).
-- `OPENFGA_GRPC_PORT`: gRPC Port number (default: `8081`).
-- `OPENFGA_PATH_PREFIX`: URL path prefix (e.g., `api` or `/v1`).
+Useful container variables: `OPENFGA_ENDPOINT` (full URL, takes precedence), or `OPENFGA_HOST` / `OPENFGA_SCHEME` / `OPENFGA_HTTP_PORT` / `OPENFGA_GRPC_PORT` / `OPENFGA_PATH_PREFIX`; `DISABLE_LOCAL_OPENFGA=true` to force UI-only; `ENABLE_LOCAL_OPENFGA=true` to force the embedded instance. For the multi-environment/token-service setup, provide the same `.env` variables described above (the nginx template wires the `/token-service/<env>` proxy). An example is in [`examples/docker-compose.yml`](examples/docker-compose.yml). CI publishes an image to GHCR (`ghcr.io/<owner>/openfga-studio`) on `v*` tags.
 
-### 3. Advanced Configuration
-- **Force UI Only**: `DISABLE_LOCAL_OPENFGA=true` (useful if you don't want the embedded instance to start, even if no external host is configured).
-- **Force Local Instance**: `ENABLE_LOCAL_OPENFGA=true` (forces embedded instance even if external variables are present).
+---
 
-### Developing & testing the UI locally (npm)
+## Data migration scripts
 
-You can run and test the UI without building the Docker image.
+Backfilling existing data into OpenFGA is done with the Node scripts in [`scripts/`](scripts/) (e.g. `backfill-task-tuples.mjs`, `migrate-user-tuples.mjs`, `migrate-assessment-tuples.mjs`, `migrate-assessment-template-tuples.mjs`). Each reads an RFC-4180 CSV, transforms rows into structural tuples for a specific resource, and writes them **directly** to the OpenFGA API.
 
-- Install dependencies:
+```bash
+node scripts/backfill-task-tuples.mjs --csv path/to/data.csv --dry-run
+node scripts/backfill-task-tuples.mjs --csv path/to/data.csv --model-id <authorization-model-id>
+```
 
-  npm install
+Common flags: `--csv <path>` (required), `--model-id <id>` (required unless `--dry-run`), `--dry-run` (transform + print stats, write nothing), `--batch-size <n>`. Writes use `on_duplicate: ignore` (idempotent, safe to re-run). Scripts read their target from `.env` (`VITE_OPENFGA_API_URL`, `VITE_OPENFGA_STORE_ID`, and a token).
 
-- Run the dev server (fast, HMR). The dev server proxies `/api` to `http://localhost:8080` by default:
+> These writes go straight to OpenFGA and **bypass any Kafka/audit event pipeline**. Never commit real source CSVs — treat migration input data as sensitive.
 
-  npm run dev
+---
 
-  (dev server default port: `5173`)
+## Project structure
 
-- Build and preview a production bundle:
+```
+src/
+  components/        one folder per feature (AuthModelTab, AuthModelGraph,
+                     TuplesTab, QueryTab, LookupTab, BenchmarkTab, ConnectionInfo, common/…)
+  services/          OpenFGAService (API), token/environment stores, latency bus
+  utils/             modelGraph, modelWeights, resolutionEngine, graphLayout, modelConverter, tupleHelper
+  contexts/          Environment, Token, Toast, DirtyState
+  hooks/             useHistory, useLocalStorage
+  environments.ts    environment + tier definitions
+scripts/             data migration / seeding scripts
+templates/, bin/     nginx + OpenFGA startup templating for the container
+```
 
-  VITE_OPENFGA_API_URL=http://localhost:8080 npm run build
-  npm run preview
+---
 
-- Point the UI at an existing OpenFGA instance:
-  - Set `VITE_OPENFGA_API_URL` to the full API URL (example: `http://openfga.example.com:8080`) when running `npm run dev` or when building the app. Example:
+## Development & testing
 
-    VITE_OPENFGA_API_URL=http://openfga.example.com:8080 npm run dev
+- Deeper development and container internals are documented in [DEVELOPMENT.md](DEVELOPMENT.md).
+- Run the test suite with `npm test`; type-check and lint with `npm run build` / `npm run lint`.
+- The dev server proxies `/api` (to a local OpenFGA) and `/token-service/<env>` (see `vite.config.ts`).
 
-  - Alternatively, create a `.env.local` file with `VITE_OPENFGA_API_URL="http://openfga.example.com:8080"`.
+---
 
-- Notes on CORS & proxying:
-  - The dev server proxies `/api` to `http://localhost:8080` by default (see `vite.config.ts`). If you point to an external OpenFGA, either enable CORS on that server or configure the `server.proxy` block in `vite.config.ts` to route API calls through the dev server.
+## License & credits
 
-- Running a local OpenFGA for development:
-  - Download and run the OpenFGA binary (see https://github.com/openfga/openfga/releases) and start with:
+Licensed under the **Apache License 2.0** (see [LICENSE](LICENSE)).
 
-    ./openfga run --http-addr 0.0.0.0:8080 --grpc-addr 0.0.0.0:8081
-
-  - Or run an existing OpenFGA container and point the UI at it (set `VITE_OPENFGA_API_URL` or rely on the proxy).
-
-### Docker Compose example
-
-An example docker-compose file is available at `examples/docker-compose.yml`. It shows a development setup (default local OpenFGA) and an example for pointing to an external OpenFGA provider.
+OpenFGA Studio is a fine-grained-authorization tooling UI built on top of [OpenFGA](https://openfga.dev) and originated from the open-source [openfga-studio](https://github.com/prakashm88/openfga-studio) project. It is not affiliated with OpenFGA Inc.'s hosted Playground.
