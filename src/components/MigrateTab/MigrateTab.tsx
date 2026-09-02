@@ -24,6 +24,7 @@ import {
 } from '../../utils/migrationTransform';
 import { validateTemplate } from '../../utils/migrationSchema';
 import { validateAgainstModel } from '../../utils/migrationModelCheck';
+import { extractRelationshipMetadata } from '../../utils/tupleHelper';
 import { exportAsScript, slugify } from '../../utils/exportScript';
 import { SourcePicker } from './SourcePicker';
 import { MappingEditor } from './MappingEditor';
@@ -125,6 +126,21 @@ export default function MigrateTab({ storeId, storeName, currentModel, authModel
     () => (transformResult ? validateAgainstModel(transformResult.tuples, currentModel) : []),
     [transformResult, currentModel],
   );
+
+  // Type/relation names from the active model — seed the Builder's autocompletes.
+  const modelMeta = useMemo((): { types: string[]; relations: string[] } => {
+    if (!currentModel || !currentModel.trim()) return { types: [], relations: [] };
+    try {
+      const meta = extractRelationshipMetadata(currentModel);
+      const types = Array.from(meta.types.keys()).sort();
+      const relations = Array.from(
+        new Set(Array.from(meta.types.values()).flatMap((t) => t.relations)),
+      ).sort();
+      return { types, relations };
+    } catch {
+      return { types: [], relations: [] };
+    }
+  }, [currentModel]);
 
   // Reset the diff whenever the produced tuple set could have changed.
   useEffect(() => {
@@ -236,6 +252,8 @@ export default function MigrateTab({ storeId, storeName, currentModel, authModel
           sampleRows={parsed.rows}
           previewTuples={transformResult?.sample ?? []}
           producedCount={transformResult?.stats.produced ?? 0}
+          modelTypes={modelMeta.types}
+          modelRelations={modelMeta.relations}
           savedTemplates={savedTemplates}
           onSaveTemplate={saveTemplate}
           onLoadTemplate={loadTemplate}

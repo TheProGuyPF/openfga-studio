@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Editor, { loader, type OnMount } from '@monaco-editor/react';
 import {
   Box,
@@ -16,6 +16,8 @@ import {
   List,
   ListItem,
   ListItemText,
+  ToggleButton,
+  ToggleButtonGroup,
   useTheme,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -23,9 +25,13 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ViewListIcon from '@mui/icons-material/ViewList';
+import DataObjectIcon from '@mui/icons-material/DataObject';
 import { MIGRATION_TEMPLATE_SCHEMA, describeRule } from '../../utils/migrationSchema';
 import type { MigrationTemplate, Tuple } from '../../utils/migrationTransform';
 import type { SavedTemplate } from './types';
+import { MappingBuilder } from './MappingBuilder';
+import { normalizeTemplate, serializeTemplate, BLANK_TEMPLATE } from './mappingBuilderModel';
 
 interface MappingEditorProps {
   configText: string;
@@ -36,6 +42,8 @@ interface MappingEditorProps {
   sampleRows: Record<string, string>[];
   previewTuples: Tuple[];
   producedCount: number;
+  modelTypes: string[];
+  modelRelations: string[];
   savedTemplates: SavedTemplate[];
   onSaveTemplate: () => void;
   onLoadTemplate: (name: string) => void;
@@ -53,6 +61,8 @@ export function MappingEditor({
   headers,
   previewTuples,
   producedCount,
+  modelTypes,
+  modelRelations,
   savedTemplates,
   onSaveTemplate,
   onLoadTemplate,
@@ -61,6 +71,20 @@ export function MappingEditor({
 }: MappingEditorProps) {
   const theme = useTheme();
   const importRef = useRef<HTMLInputElement>(null);
+  const [view, setView] = useState<'builder' | 'json'>('builder');
+
+  // The Builder edits the SAME config as the JSON editor. Derive a well-formed
+  // working template from the current text; null means the JSON can't be parsed,
+  // in which case the Builder shows a recovery prompt rather than crashing.
+  const builderTemplate = useMemo(() => {
+    try {
+      return normalizeTemplate(JSON.parse(configText));
+    } catch {
+      return null;
+    }
+  }, [configText]);
+
+  const handleBuilderChange = (t: MigrationTemplate) => onConfigChange(serializeTemplate(t));
 
   const handleMount: OnMount = (_editor, monaco) => {
     monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
@@ -109,6 +133,21 @@ export function MappingEditor({
       </Typography>
 
       <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap alignItems="center">
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={view}
+          onChange={(_, v) => v && setView(v)}
+          aria-label="Mapping authoring mode"
+          sx={{ mr: 0.5 }}
+        >
+          <ToggleButton value="builder" sx={{ textTransform: 'none', px: 1.5 }}>
+            <ViewListIcon fontSize="small" sx={{ mr: 0.5 }} /> Builder
+          </ToggleButton>
+          <ToggleButton value="json" sx={{ textTransform: 'none', px: 1.5 }}>
+            <DataObjectIcon fontSize="small" sx={{ mr: 0.5 }} /> JSON
+          </ToggleButton>
+        </ToggleButtonGroup>
         <Button size="small" variant="outlined" startIcon={<ContentCopyIcon />} onClick={onCopyAiPrompt}>
           Copy AI prompt
         </Button>
@@ -165,24 +204,50 @@ export function MappingEditor({
       </Stack>
 
       <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 420px', minWidth: 320 }}>
-          <Box sx={{ height: 340, border: `1px solid ${theme.palette.divider}` }}>
-            <Editor
-              height="100%"
-              defaultLanguage="json"
-              path="migration-template.json"
-              value={configText}
-              onChange={(v) => onConfigChange(v ?? '')}
-              onMount={handleMount}
-              theme={theme.palette.mode === 'dark' ? 'custom-dark' : 'light'}
-              options={{
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                fontSize: 13,
-                tabSize: 2,
-              }}
+        <Box sx={{ flex: view === 'builder' ? '1 1 560px' : '1 1 420px', minWidth: 320 }}>
+          {view === 'json' ? (
+            <Box sx={{ height: 340, border: `1px solid ${theme.palette.divider}` }}>
+              <Editor
+                height="100%"
+                defaultLanguage="json"
+                path="migration-template.json"
+                value={configText}
+                onChange={(v) => onConfigChange(v ?? '')}
+                onMount={handleMount}
+                theme={theme.palette.mode === 'dark' ? 'custom-dark' : 'light'}
+                options={{
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  fontSize: 13,
+                  tabSize: 2,
+                }}
+              />
+            </Box>
+          ) : builderTemplate ? (
+            <MappingBuilder
+              template={builderTemplate}
+              onChange={handleBuilderChange}
+              headers={headers}
+              modelTypes={modelTypes}
+              modelRelations={modelRelations}
             />
-          </Box>
+          ) : (
+            <Alert
+              severity="warning"
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => onConfigChange(serializeTemplate(BLANK_TEMPLATE))}
+                >
+                  Reset to blank
+                </Button>
+              }
+            >
+              The JSON can't be parsed, so the form is unavailable. Fix it in the JSON view, or reset to a blank
+              template.
+            </Alert>
+          )}
           {errors.length > 0 ? (
             <Alert severity="warning" sx={{ mt: 1 }}>
               <Typography variant="body2" component="div">
@@ -203,7 +268,7 @@ export function MappingEditor({
         </Box>
 
         <Box sx={{ flex: '1 1 360px', minWidth: 300 }}>
-          {template && (
+          {view === 'json' && template && (
             <>
               <Typography variant="subtitle2" gutterBottom>
                 What this template does
