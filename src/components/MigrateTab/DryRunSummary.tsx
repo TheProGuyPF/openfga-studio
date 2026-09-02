@@ -73,13 +73,14 @@ export function DryRunSummary({
   diffLoading,
   onRunDiff,
 }: DryRunSummaryProps) {
-  const [debugIndex, setDebugIndex] = useState('0');
+  const [debugIndex, setDebugIndex] = useState('1');
 
   const groups = useMemo(() => (result ? groupByTypeRelation(result.tuples) : []), [result]);
 
   const debugResult = useMemo(() => {
     if (!template) return null;
-    const i = Number(debugIndex);
+    // Displayed row numbers are 1-based (match the skipped-rows list).
+    const i = Number(debugIndex) - 1;
     if (!Number.isInteger(i) || i < 0 || i >= rows.length) return null;
     return { index: i, ...transformRow(rows[i], template) };
   }, [debugIndex, rows, template]);

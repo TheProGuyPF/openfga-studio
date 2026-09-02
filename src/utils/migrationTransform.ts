@@ -8,7 +8,9 @@
 // whenColumnsPresent gate → resolve user/relation/object (enum lookup, case fold,
 // `#userset` suffix) → per-segment validation (^[^\s]{2,256}$) under validationMode.
 // Then an optional cross-row dedupe on user|relation|object.
-import { parse } from 'csv-parse/sync';
+// Browser ESM build: bundles its own Buffer polyfill, so this runs in the browser
+// (Vite) without a Node `Buffer` global. Same sync API as csv-parse/sync.
+import { parse } from 'csv-parse/browser/esm/sync';
 
 export interface Tuple {
   user: string;
