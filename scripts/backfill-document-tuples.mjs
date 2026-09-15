@@ -6,10 +6,18 @@
  * documents.fga / recyclebin.fga). Per document it writes, as applicable:
  *   - (institution:X, parent_institution, document:D)                    — always
  *   - (note:N, parent_note, document:D)                                  — note-attached
+ *   - (task:T, parent_task, document:D)                                  — task / internal-form
+ *   - (entity:E, parent_entity, document:D)                              — entity-attached
  *   - (external_form_submission:FT,
  *      parent_external_form_submission, document:D)                      — external-form attachments
  *   - (institution:X, parent_institution, recycle_bin_entry:D)           — soft-deleted
  *   - (document:D, parent_document, recycle_bin_entry:D)                 — soft-deleted
+ *
+ * `parent_task` and `parent_entity` arrived with MWI-1002 (migration
+ * 1787149353_add_parent_task_and_parent_entity_to_document). `parent_can_read`
+ * is a UNION over all four parents, so any one of them grants read — which is
+ * why each parent is gated on the matching `context_type` rather than on the
+ * mere presence of an id column.
  *
  * The mapping mirrors mx-authorization's document_events inbox handler, which
  * is the runtime source of these tuples:
@@ -73,6 +81,22 @@ const STATE_DELETED = "deleted";
 
 /** `document_context_type` value whose FGA parent is an external_form_submission. */
 const CONTEXT_EXTERNAL_FORM = "external_form";
+
+/**
+ * `document_context_type` values whose FGA parent is a task. `internal_form` is
+ * here because the tech design routes internal-form document access through
+ * `can_read on parent task (internal_forms_id)` — see rowToDocumentTuples.
+ */
+const CONTEXT_TASK_PARENTS = new Set(["task", "internal_form"]);
+
+/** `document_context_type` value whose FGA parent is an entity. */
+const CONTEXT_ENTITY = "entity";
+
+/**
+ * Contexts the model still defines no read parent for. Documents in these
+ * contexts get `parent_institution` only and stay unreadable.
+ */
+const CONTEXT_NO_PARENT = new Set(["assessment", "bitsight"]);
 
 const DEFAULT_BATCH_SIZE = 100;
 /** OpenFGA's default `maxTuplesPerWrite`; a larger batch is rejected outright. */
@@ -264,6 +288,8 @@ export function rowToDocumentTuples(row) {
   const state = row.state.trim().toLowerCase();
   const noteId = row.note_id?.trim();
   const formTemplateId = row.form_template_id?.trim();
+  const taskId = row.task_id?.trim();
+  const entityId = row.entity_id?.trim();
   const contextType = row.context_type?.trim().toLowerCase();
 
   const objectDocument = `document:${documentId}`;
@@ -293,6 +319,35 @@ export function rowToDocumentTuples(row) {
     tuples.push({
       user: `external_form_submission:${formTemplateId}`,
       relation: "parent_external_form_submission",
+      object: objectDocument,
+    });
+  }
+
+  // Task parent (MWI-1002 added `parent_task` to `document`).
+  //
+  // Selected by context_type rather than by task_id presence: a document in
+  // another context can carry a task_id, and adding parent_task for it would
+  // widen `parent_can_read` — the relation is a UNION, so every extra parent is
+  // an extra way to read the document.
+  //
+  // `internal_form` is included per the Document Permissions tech design
+  // amendment (10 Aug 2026): internal-form document routes check "can_read on
+  // parent task (internal_forms_id)". JUDGEMENT CALL — no runtime handler writes
+  // this yet, so confirm with mx-authz-reviewers before relying on it.
+  if (CONTEXT_TASK_PARENTS.has(contextType) && taskId) {
+    tuples.push({
+      user: `task:${taskId}`,
+      relation: "parent_task",
+      object: objectDocument,
+    });
+  }
+
+  // Entity parent (MWI-1002 added `parent_entity` to `document`). Same
+  // context_type-gating rationale as parent_task above.
+  if (contextType === CONTEXT_ENTITY && entityId) {
+    tuples.push({
+      user: `entity:${entityId}`,
+      relation: "parent_entity",
       object: objectDocument,
     });
   }
@@ -344,6 +399,7 @@ export function summarize(rows, tuples) {
   const skipped = [];
   let externalFormMissingTemplate = 0;
   let noReadParent = 0;
+  let noParentContext = 0;
 
   for (const row of rows) {
     const reason = rowSkipReason(row);
@@ -352,14 +408,20 @@ export function summarize(rows, tuples) {
       continue;
     }
     const contextType = row.context_type?.trim().toLowerCase();
-    const hasNote = Boolean(row.note_id?.trim());
     const hasTemplate = Boolean(row.form_template_id?.trim());
     if (contextType === CONTEXT_EXTERNAL_FORM && !hasTemplate) {
       externalFormMissingTemplate++;
     }
-    if (!hasNote && !(contextType === CONTEXT_EXTERNAL_FORM && hasTemplate)) {
-      noReadParent++;
-    }
+    // Derive "has a read parent" from the tuples actually built for the row, so
+    // this count can never drift from rowToDocumentTuples as parents are added.
+    // Scoped to tuples ON the document: a soft-deleted row also yields
+    // parent_document on its recycle_bin_entry, which is not a read parent here.
+    const documentObject = `document:${row.document_id.trim()}`;
+    const hasReadParent = rowToDocumentTuples(row).some(
+      (t) => t.object === documentObject && t.relation !== "parent_institution",
+    );
+    if (!hasReadParent) noReadParent++;
+    if (CONTEXT_NO_PARENT.has(contextType)) noParentContext++;
   }
 
   const countWhere = (predicate) => tuples.filter(predicate).length;
@@ -370,11 +432,14 @@ export function summarize(rows, tuples) {
     skipped,
     externalFormMissingTemplate,
     noReadParent,
+    noParentContext,
     parentInstitutionOnDocument: countWhere(
       (t) =>
         t.relation === "parent_institution" && t.object.startsWith("document:"),
     ),
     parentNote: countWhere((t) => t.relation === "parent_note"),
+    parentTask: countWhere((t) => t.relation === "parent_task"),
+    parentEntity: countWhere((t) => t.relation === "parent_entity"),
     parentExternalFormSubmission: countWhere(
       (t) => t.relation === "parent_external_form_submission",
     ),
@@ -497,6 +562,8 @@ function printSummary(stats, rawTupleCount, tupleCount) {
   line("Skipped rows (see reasons below)", stats.skipped.length);
   line("parent_institution on document", stats.parentInstitutionOnDocument);
   line("parent_note on document", stats.parentNote);
+  line("parent_task on document", stats.parentTask);
+  line("parent_entity on document", stats.parentEntity);
   line(
     "parent_external_form_submission on document",
     stats.parentExternalFormSubmission,
@@ -511,9 +578,10 @@ function printSummary(stats, rawTupleCount, tupleCount) {
 
   if (stats.noReadParent > 0) {
     console.log(
-      `\nNote: ${stats.noReadParent} document(s) get parent_institution only — the model\n` +
-        "  defines no read parent for entity / assessment / task / internal_form /\n" +
-        "  bitsight contexts, so can_read stays false for them until it does.",
+      `\nNote: ${stats.noReadParent} document(s) get parent_institution only, so can_read\n` +
+        `  stays false for them. ${stats.noParentContext} are in an assessment/bitsight context, which\n` +
+        "  the model still defines no read parent for; the rest are unclaimed drafts\n" +
+        "  or rows whose context carries no matching id.",
     );
   }
   if (stats.externalFormMissingTemplate > 0) {
@@ -554,7 +622,7 @@ async function main() {
       `Error: --batch-size must be an integer between 1 and ${MAX_BATCH_SIZE} (OpenFGA's maxTuplesPerWrite)`,
     );
     process.exit(1);
-  }
+  } 
 
   const envPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
@@ -569,7 +637,7 @@ async function main() {
 
   if (!apiUrl && !args.dryRun) {
     console.error(
-      "Error: OPENFGA_API_URL is not set",
+      "Error: OPENFGA_API_URL (or MX_AUTH_OPENFGA_ENDPOINT) is not set",
     );
     process.exit(1);
   }
@@ -623,7 +691,7 @@ async function main() {
     // A backfill can outlive the token it started with. On a 401 the writer
     // re-reads the source so an operator can refresh it mid-run.
     refreshToken() {
-      const refreshed = readEnv().OPENFGA_API_TOKEN;
+      const refreshed = env.VITE_OPENFGA_API_TOKEN || env.VITE_FGA_X2S_TOKEN;
       if (refreshed && refreshed !== this.token) {
         this.token = refreshed;
         console.warn("  Picked up a refreshed OPENFGA_API_TOKEN");
