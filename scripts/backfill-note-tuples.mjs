@@ -497,7 +497,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Process env wins over the env file, so a one-off override needs no edit.
   const envPath = path.resolve(
     path.dirname(new URL(import.meta.url).pathname),
     "..",
@@ -565,7 +564,7 @@ async function main() {
     // A backfill can outlive the token it started with. On a 401 the writer
     // re-reads the source so an operator can refresh it mid-run.
     refreshToken() {
-      const refreshed = readEnv().OPENFGA_API_TOKEN;
+      const refreshed = env.VITE_OPENFGA_API_TOKEN || env.VITE_FGA_X2S_TOKEN;
       if (refreshed && refreshed !== this.token) {
         this.token = refreshed;
         console.warn("  Picked up a refreshed OPENFGA_API_TOKEN");

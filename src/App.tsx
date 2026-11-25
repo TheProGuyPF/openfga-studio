@@ -24,7 +24,7 @@ const prefersDark = () =>
   window.matchMedia('(prefers-color-scheme: dark)').matches;
 
 // Tab index <-> URL name mapping for deep-linkable tabs.
-const TAB_NAMES = ['model', 'tuples', 'query', 'lookup', 'benchmark'] as const;
+const TAB_NAMES = ['model', 'tuples', 'query', 'lookup', 'benchmark', 'migrate'] as const;
 function tabNameToIndex(name: string | null): number | null {
   if (!name) return null;
   const i = TAB_NAMES.indexOf(name as (typeof TAB_NAMES)[number]);
@@ -36,10 +36,12 @@ const TuplesTab = lazy(() => import('./components/TuplesTab/TuplesTab'));
 const QueryTab = lazy(() => import('./components/QueryTab/QueryTab'));
 const LookupTab = lazy(() => import('./components/LookupTab/LookupTab'));
 const BenchmarkTab = lazy(() => import('./components/BenchmarkTab/BenchmarkTab'));
+const MigrateTab = lazy(() => import('./components/MigrateTab/MigrateTab'));
 
 const QUERY_TAB_INDEX = 2;
 const LOOKUP_TAB_INDEX = 3;
 const BENCHMARK_TAB_INDEX = 4;
+const MIGRATE_TAB_INDEX = 5;
 
 function App() {
   // Persisted theme; first-run default honors the OS color scheme.
@@ -226,6 +228,7 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                   <Tab label="Query" />
                   <Tab label="Lookup" />
                   <Tab label="Benchmark" />
+                  <Tab label="Migrate" />
                 </Tabs>
               </Box>
 
@@ -285,6 +288,15 @@ function Workspace({ onToggleTheme }: { onToggleTheme: () => void }) {
                     <Suspense fallback={<TabLoader />}>
                       <BenchmarkTab
                         storeId={selectedStoreId}
+                        currentModel={authModel}
+                        authModelId={authModelId}
+                      />
+                    </Suspense>
+                  ) : activeTab === MIGRATE_TAB_INDEX ? (
+                    <Suspense fallback={<TabLoader />}>
+                      <MigrateTab
+                        storeId={selectedStoreId}
+                        storeName={selectedStoreName}
                         currentModel={authModel}
                         authModelId={authModelId}
                       />

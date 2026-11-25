@@ -638,4 +638,40 @@ export class OpenFGAService {
     }
     return deleted;
   }
+
+  /**
+   * Delete one batch and throw on any real failure (unlike `deleteTuples`, which
+   * swallows errors). A tuple that is already absent is not a failure: OpenFGA
+   * rejects the whole batch in that case, so we retry per tuple and ignore only
+   * the "does not exist" rejections. Safe to re-run after a partial rollback.
+   */
+  static async deleteTuplesStrict(
+    storeId: string,
+    tuples: Array<{ user: string; relation: string; object: string }>,
+    authModelId?: string,
+  ): Promise<void> {
+    const post = (keys: typeof tuples) =>
+      api.post(`/stores/${storeId}/write`, {
+        deletes: { tuple_keys: keys },
+        ...(authModelId ? { authorization_model_id: authModelId } : {}),
+      });
+    const isMissing = (error: unknown) =>
+      axios.isAxiosError(error) &&
+      error.response?.status === 400 &&
+      /does not exist/i.test(String((error.response.data as { message?: string } | undefined)?.message ?? ''));
+
+    try {
+      await post(tuples);
+      return;
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+    for (const tuple of tuples) {
+      try {
+        await post([tuple]);
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
+    }
+  }
 }
