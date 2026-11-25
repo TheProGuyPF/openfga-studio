@@ -27,7 +27,13 @@ export interface RunManifest {
   templateName: string;
   csvName: string;
   csvHash: string;
-  counts: { produced: number; written: number; failed: number };
+  counts: {
+    produced: number;
+    written: number;
+    failed: number;
+    /** Tuples already in the store at apply time; excluded from the rollback set. */
+    alreadyPresent?: number;
+  };
   status: RunStatus;
 }
 

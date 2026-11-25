@@ -55,7 +55,12 @@ export interface BatchFailure {
 
 export interface ApplyResult {
   written: number;
+  /** Tuples whose write succeeded — the rollback set. */
+  applied: Tuple[];
+  /** Tuples whose batch errored. */
   failed: Tuple[];
+  /** Tuples never attempted because the run was aborted. */
+  pending: Tuple[];
   failures: BatchFailure[];
   aborted: boolean;
 }
@@ -74,43 +79,82 @@ function errMessage(err: unknown): string {
   return e?.response?.data?.message || e?.message || String(err);
 }
 
+interface BatchRunOptions {
+  batchSize?: number;
+  concurrency?: number;
+  signal?: AbortSignal;
+  onProgress?: (p: ApplyProgress) => void;
+}
+
+interface BatchRunResult {
+  done: Tuple[];
+  failed: Tuple[];
+  pending: Tuple[];
+  failures: BatchFailure[];
+  aborted: boolean;
+}
+
 /**
- * Apply `tuples` in batches with bounded concurrency. Never throws on a batch
- * error — failures are captured and the run continues (mirrors the scripts'
- * `*-failures.json`). An abort returns partial results with `aborted:true`.
+ * Run `op` over `tuples` in batches with bounded concurrency. Never throws on a
+ * batch error. On abort, workers stop taking new batches but every in-flight batch
+ * is awaited, so `done`/`failed` are exact and `pending` is precisely the set that
+ * was never attempted.
  */
-export async function applyTuples(tuples: Tuple[], options: ApplyOptions): Promise<ApplyResult> {
-  const batchSize = options.batchSize ?? 40;
-  const concurrency = options.concurrency ?? 5;
-  const batches = chunk(tuples, batchSize);
+async function runBatches(
+  tuples: Tuple[],
+  options: BatchRunOptions,
+  op: (batch: Tuple[]) => Promise<void>,
+): Promise<BatchRunResult> {
+  const batches = chunk(tuples, options.batchSize ?? 40);
+  const concurrency = Math.min(Math.max(1, options.concurrency ?? 5), batches.length);
   const total = tuples.length;
 
-  let written = 0;
-  let done = 0;
+  const done: Tuple[] = [];
   const failed: Tuple[] = [];
   const failures: BatchFailure[] = [];
-  let aborted = false;
+  let finished = 0;
+  let next = 0;
 
-  try {
-    await mapWithConcurrency(batches, concurrency, async (batch, i) => {
-      throwIfAborted(options.signal);
+  const workers = Array.from({ length: concurrency }, async () => {
+    for (;;) {
+      if (options.signal?.aborted) return;
+      const i = next++;
+      if (i >= batches.length) return;
+      const batch = batches[i];
       try {
-        await options.write(batch);
-        written += batch.length;
+        await op(batch);
+        done.push(...batch);
       } catch (err) {
         failed.push(...batch);
         failures.push({ batchIndex: i, tuples: batch, error: errMessage(err) });
       } finally {
-        done += batch.length;
-        options.onProgress?.({ done, total });
+        finished += batch.length;
+        options.onProgress?.({ done: finished, total });
       }
-    });
-  } catch (err) {
-    if (err instanceof AbortedError) aborted = true;
-    else throw err;
-  }
+    }
+  });
+  await Promise.all(workers);
 
-  return { written, failed, failures, aborted };
+  const pending = batches.slice(Math.min(next, batches.length)).flat();
+  return { done, failed, pending, failures, aborted: pending.length > 0 };
+}
+
+/**
+ * Apply `tuples` in batches with bounded concurrency. Never throws on a batch
+ * error — failures are captured and the run continues (mirrors the scripts'
+ * `*-failures.json`). An abort returns exact partial results: `applied`, `failed`,
+ * and `pending` (never attempted) partition the input.
+ */
+export async function applyTuples(tuples: Tuple[], options: ApplyOptions): Promise<ApplyResult> {
+  const r = await runBatches(tuples, options, options.write);
+  return {
+    written: r.done.length,
+    applied: r.done,
+    failed: r.failed,
+    pending: r.pending,
+    failures: r.failures,
+    aborted: r.aborted,
+  };
 }
 
 /** Retry only the previously-failed tuples (resumable). Thin alias over applyTuples. */
@@ -119,7 +163,10 @@ export function retryFailed(failedTuples: Tuple[], options: ApplyOptions): Promi
 }
 
 export interface RollbackOptions {
-  /** Deletes a single batch of tuples (tolerant — deleting a missing tuple may error). */
+  /**
+   * Deletes a single batch of tuples. Must throw on any real failure; a tuple that
+   * is already absent must NOT count as a failure (rollback stays idempotent).
+   */
   del: (tuples: Tuple[]) => Promise<void>;
   batchSize?: number;
   concurrency?: number;
@@ -129,44 +176,63 @@ export interface RollbackOptions {
 
 export interface RollbackResult {
   deleted: number;
+  /** Tuples whose delete errored. */
+  failed: Tuple[];
+  /** Tuples never attempted because the run was aborted. */
+  pending: Tuple[];
   failures: BatchFailure[];
   aborted: boolean;
 }
 
 /** Delete a previously-applied tuple set (durable rollback). */
 export async function rollbackTuples(tuples: Tuple[], options: RollbackOptions): Promise<RollbackResult> {
-  const batchSize = options.batchSize ?? 40;
-  const concurrency = options.concurrency ?? 5;
-  const batches = chunk(tuples, batchSize);
-  const total = tuples.length;
-
-  let deleted = 0;
-  let done = 0;
-  const failures: BatchFailure[] = [];
-  let aborted = false;
-
-  try {
-    await mapWithConcurrency(batches, concurrency, async (batch, i) => {
-      throwIfAborted(options.signal);
-      try {
-        await options.del(batch);
-        deleted += batch.length;
-      } catch (err) {
-        failures.push({ batchIndex: i, tuples: batch, error: errMessage(err) });
-      } finally {
-        done += batch.length;
-        options.onProgress?.({ done, total });
-      }
-    });
-  } catch (err) {
-    if (err instanceof AbortedError) aborted = true;
-    else throw err;
-  }
-
-  return { deleted, failures, aborted };
+  const r = await runBatches(tuples, options, options.del);
+  return {
+    deleted: r.done.length,
+    failed: r.failed,
+    pending: r.pending,
+    failures: r.failures,
+    aborted: r.aborted,
+  };
 }
 
-function tupleKey(t: Tuple): string {
+export interface ExistingScanOptions {
+  /** Returns EVERY existing tuple on an object (callers must follow pagination). */
+  read: (object: string) => Promise<Tuple[]>;
+  concurrency?: number;
+  signal?: AbortSignal;
+  onProgress?: (p: ApplyProgress) => void;
+}
+
+/**
+ * Full (non-sampled) scan for tuples that already exist in the store, grouped by
+ * object. Used to keep pre-existing tuples out of a run's rollback set: writes use
+ * `on_duplicate:'ignore'`, so without this a rollback would delete tuples the run
+ * never created. Fails closed — any read error or abort rejects, because a partial
+ * scan would silently reintroduce that data-loss.
+ */
+export async function findExistingTuples(
+  tuples: Tuple[],
+  options: ExistingScanOptions,
+): Promise<Set<string>> {
+  const objects = [...new Set(tuples.map((t) => t.object))];
+  const wanted = new Set(tuples.map(tupleKey));
+  const existing = new Set<string>();
+  let scanned = 0;
+
+  await mapWithConcurrency(objects, options.concurrency ?? 8, async (object) => {
+    throwIfAborted(options.signal);
+    for (const t of await options.read(object)) {
+      const key = tupleKey(t);
+      if (wanted.has(key)) existing.add(key);
+    }
+    scanned++;
+    options.onProgress?.({ done: scanned, total: objects.length });
+  });
+  return existing;
+}
+
+export function tupleKey(t: Tuple): string {
   return `${t.user}|${t.relation}|${t.object}`;
 }
 

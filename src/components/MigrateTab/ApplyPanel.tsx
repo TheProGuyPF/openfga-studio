@@ -25,11 +25,12 @@ import { useEnvironment } from '../../contexts/EnvironmentContext';
 import { useToast } from '../../contexts/ToastContext';
 import { ENV_TIER_STYLE, isGuarded } from '../../environments';
 import { OpenFGAService } from '../../services/OpenFGAService';
-import { applyTuples, type ApplyResult } from '../../services/migrationEngine';
+import { AbortedError, applyTuples, findExistingTuples, tupleKey, type ApplyResult } from '../../services/migrationEngine';
 import type { MigrationTemplate, Tuple } from '../../utils/migrationTransform';
 import type { RunRecord, RunStatus } from '../../services/migrationStore';
 import { saveRun } from '../../services/migrationStore';
 import { downloadJson } from './download';
+import { readAllOnObject } from './readAllOnObject';
 
 interface ApplyPanelProps {
   storeId: string;
@@ -67,6 +68,7 @@ export function ApplyPanel({
   const [blockOnInvalid, setBlockOnInvalid] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [phase, setPhase] = useState<'scanning' | 'writing'>('writing');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState<ApplyResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -91,7 +93,32 @@ export function ApplyPanel({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const res = await applyTuples(tuples, {
+    // Writes use on_duplicate:'ignore', so tuples that already exist are no-ops.
+    // Exclude them up front so the rollback set only holds tuples this run created.
+    setPhase('scanning');
+    let existing: Set<string>;
+    try {
+      existing = await findExistingTuples(tuples, {
+        read: (object) => readAllOnObject(storeId, object),
+        signal: controller.signal,
+        onProgress: setProgress,
+      });
+    } catch (err) {
+      setRunning(false);
+      toast(
+        err instanceof AbortedError
+          ? 'Aborted while checking existing tuples — nothing was written'
+          : `Could not check existing tuples — nothing was written (${err instanceof Error ? err.message : String(err)})`,
+        err instanceof AbortedError ? 'warning' : 'error',
+      );
+      return;
+    }
+
+    const toWrite = tuples.filter((t) => !existing.has(tupleKey(t)));
+    setPhase('writing');
+    setProgress({ done: 0, total: toWrite.length });
+
+    const res = await applyTuples(toWrite, {
       write: (batch) => OpenFGAService.writeTuples(storeId, batch, authModelId, batch.length).then(() => undefined),
       batchSize: 40,
       concurrency: 5,
@@ -99,10 +126,12 @@ export function ApplyPanel({
       onProgress: setProgress,
     });
 
-    setResult(res);
+    // Aborted-before-attempt tuples are resumable exactly like failed ones.
+    const retryable = [...res.failed, ...res.pending];
+    setResult({ ...res, failed: retryable, pending: [] });
     setRunning(false);
 
-    const status: RunStatus = res.failed.length === 0 ? 'applied' : res.written > 0 ? 'partial' : 'failed';
+    const status: RunStatus = retryable.length === 0 ? 'applied' : res.written > 0 ? 'partial' : 'failed';
     const record: RunRecord = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       envKey: environment.key,
@@ -113,17 +142,22 @@ export function ApplyPanel({
       templateName: template?.name ?? 'unnamed',
       csvName,
       csvHash,
-      counts: { produced: tuples.length, written: res.written, failed: res.failed.length },
+      counts: {
+        produced: tuples.length,
+        written: res.written,
+        failed: retryable.length,
+        alreadyPresent: tuples.length - toWrite.length,
+      },
       status,
       config: template as MigrationTemplate,
-      tuples: tuples.filter((t) => !res.failed.includes(t)),
-      failures: res.failed,
+      tuples: res.applied,
+      failures: retryable,
     };
     const persisted = await saveRun(record);
     onRunSaved();
 
     if (res.aborted) {
-      toast(`Aborted after ${res.written} tuples`, 'warning');
+      toast(`Aborted after ${res.written} tuples — ${res.pending.length.toLocaleString()} not attempted (resume via Retry)`, 'warning');
     } else if (res.failed.length > 0) {
       toast(`Applied ${res.written}, ${res.failed.length} failed`, 'warning');
     } else {
@@ -148,7 +182,15 @@ export function ApplyPanel({
     });
     setRunning(false);
     setResult((prev) =>
-      prev ? { ...prev, written: prev.written + res.written, failed: res.failed, failures: res.failures } : res,
+      prev
+        ? {
+            ...prev,
+            written: prev.written + res.written,
+            applied: [...prev.applied, ...res.applied],
+            failed: res.failed,
+            failures: res.failures,
+          }
+        : res,
     );
     toast(res.failed.length === 0 ? `Retried — all ${res.written} succeeded` : `Retried, ${res.failed.length} still failing`, res.failed.length === 0 ? 'success' : 'warning');
     onRunSaved();
@@ -225,6 +267,7 @@ export function ApplyPanel({
         <Box sx={{ mb: 1 }}>
           <LinearProgress variant="determinate" value={progress.total ? (progress.done / progress.total) * 100 : 0} />
           <Typography variant="caption" color="text.secondary">
+            {phase === 'scanning' ? 'Checking existing tuples: ' : ''}
             {progress.done.toLocaleString()} / {progress.total.toLocaleString()}
           </Typography>
         </Box>
@@ -247,7 +290,7 @@ export function ApplyPanel({
               size="small"
               variant="text"
               startIcon={<DownloadIcon />}
-              onClick={() => downloadJson('applied-tuples.json', tuples.filter((t) => !result.failed.includes(t)))}
+              onClick={() => downloadJson('applied-tuples.json', result.applied)}
             >
               Applied tuples
             </Button>

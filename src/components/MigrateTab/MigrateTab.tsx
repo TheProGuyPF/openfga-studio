@@ -284,7 +284,13 @@ export default function MigrateTab({ storeId, storeName, currentModel, authModel
           onRunSaved={loadRuns}
         />
 
-        <RunHistory runs={runs} storeId={storeId} authModelId={authModelId} onChanged={loadRuns} />
+        <RunHistory
+          runs={runs}
+          storeId={storeId}
+          storeName={storeName}
+          authModelId={authModelId}
+          onChanged={loadRuns}
+        />
       </Stack>
     </Box>
   );

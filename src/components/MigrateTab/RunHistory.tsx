@@ -20,7 +20,11 @@ import DownloadIcon from '@mui/icons-material/Download';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useToast } from '../../contexts/ToastContext';
 import { OpenFGAService } from '../../services/OpenFGAService';
-import { applyTuples, rollbackTuples } from '../../services/migrationEngine';
+import { applyTuples, findExistingTuples, rollbackTuples, tupleKey } from '../../services/migrationEngine';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { useEnvironment } from '../../contexts/EnvironmentContext';
+import { isGuarded } from '../../environments';
+import { readAllOnObject } from './readAllOnObject';
 import {
   deleteRun,
   saveRun,
@@ -32,6 +36,7 @@ import { downloadJson } from './download';
 interface RunHistoryProps {
   runs: RunRecord[];
   storeId: string;
+  storeName: string;
   authModelId: string;
   onChanged: () => void;
 }
@@ -44,41 +49,84 @@ const STATUS_COLOR: Record<RunStatus, 'success' | 'warning' | 'error' | 'default
 };
 
 /** Past runs (from IndexedDB) with durable rollback + retry-failed + downloads. */
-export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistoryProps) {
+export function RunHistory({ runs, storeId, storeName, authModelId, onChanged }: RunHistoryProps) {
   const { toast } = useToast();
+  const { environment } = useEnvironment();
+  const guarded = isGuarded(environment);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<{ kind: 'rollback' | 'retry'; run: RunRecord } | null>(null);
 
   const rollback = async (run: RunRecord) => {
+    if (run.storeId !== storeId) {
+      toast('This run was applied to a different store — refusing to roll it back here', 'error');
+      return;
+    }
     setBusyId(run.id);
-    const res = await rollbackTuples(run.tuples, {
-      del: (batch) => OpenFGAService.deleteTuples(storeId, batch, authModelId, batch.length).then(() => undefined),
-    });
-    await saveRun({ ...run, status: 'rolledback' });
-    setBusyId(null);
-    toast(`Rolled back ${res.deleted} tuples${res.failures.length ? `, ${res.failures.length} batch(es) failed` : ''}`, res.failures.length ? 'warning' : 'success');
-    onChanged();
+    try {
+      const res = await rollbackTuples(run.tuples, {
+        del: (batch) => OpenFGAService.deleteTuplesStrict(storeId, batch, authModelId),
+      });
+      const clean = res.failed.length === 0 && res.pending.length === 0;
+      await saveRun({
+        ...run,
+        // Keep only what is still in the store so a re-run targets just those.
+        tuples: clean ? run.tuples : [...res.failed, ...res.pending],
+        status: clean ? 'rolledback' : run.status,
+      });
+      toast(
+        clean
+          ? `Rolled back ${res.deleted} tuples`
+          : `Rolled back ${res.deleted}; ${res.failed.length + res.pending.length} tuple(s) still present — run Rollback again`,
+        clean ? 'success' : 'warning',
+      );
+    } finally {
+      setBusyId(null);
+      onChanged();
+    }
   };
 
   const retry = async (run: RunRecord) => {
     if (run.failures.length === 0) return;
+    if (run.storeId !== storeId) {
+      toast('This run was applied to a different store — refusing to retry it here', 'error');
+      return;
+    }
     setBusyId(run.id);
-    const res = await applyTuples(run.failures, {
-      write: (batch) => OpenFGAService.writeTuples(storeId, batch, authModelId, batch.length).then(() => undefined),
-    });
-    const succeeded = run.failures.filter((t) => !res.failed.includes(t));
-    const failed = res.failed;
-    const written = run.counts.written + res.written;
-    const status: RunStatus = failed.length === 0 ? 'applied' : written > 0 ? 'partial' : 'failed';
-    await saveRun({
-      ...run,
-      tuples: [...run.tuples, ...succeeded],
-      failures: failed,
-      counts: { ...run.counts, written, failed: failed.length },
-      status,
-    });
-    setBusyId(null);
-    toast(failed.length === 0 ? `Retried — all ${res.written} succeeded` : `Retried, ${failed.length} still failing`, failed.length === 0 ? 'success' : 'warning');
-    onChanged();
+    try {
+      // A failed batch may have contained tuples that already existed; keep those
+      // out of the rollback set (same rule as the initial apply).
+      const existing = await findExistingTuples(run.failures, {
+        read: (object) => readAllOnObject(storeId, object),
+      });
+      const toWrite = run.failures.filter((t) => !existing.has(tupleKey(t)));
+      const res = await applyTuples(toWrite, {
+        write: (batch) => OpenFGAService.writeTuples(storeId, batch, authModelId, batch.length).then(() => undefined),
+      });
+      const failed = [...res.failed, ...res.pending];
+      const written = run.counts.written + res.written;
+      const status: RunStatus = failed.length === 0 ? 'applied' : written > 0 ? 'partial' : 'failed';
+      await saveRun({
+        ...run,
+        tuples: [...run.tuples, ...res.applied],
+        failures: failed,
+        counts: {
+          ...run.counts,
+          written,
+          failed: failed.length,
+          alreadyPresent: (run.counts.alreadyPresent ?? 0) + existing.size,
+        },
+        status,
+      });
+      toast(
+        failed.length === 0 ? `Retried — all ${res.written} succeeded` : `Retried, ${failed.length} still failing`,
+        failed.length === 0 ? 'success' : 'warning',
+      );
+    } catch (err) {
+      toast(`Retry not attempted — could not check existing tuples (${err instanceof Error ? err.message : String(err)})`, 'error');
+    } finally {
+      setBusyId(null);
+      onChanged();
+    }
   };
 
   const remove = async (run: RunRecord) => {
@@ -99,6 +147,7 @@ export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistory
   }
 
   return (
+    <>
     <SectionAccordion
       title="Run history"
       defaultExpanded={false}
@@ -131,7 +180,7 @@ export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistory
                 variant="outlined"
                 color="warning"
                 startIcon={<UndoIcon />}
-                onClick={() => rollback(run)}
+                onClick={() => setPendingAction({ kind: 'rollback', run })}
                 disabled={busyId !== null || run.tuples.length === 0 || run.status === 'rolledback'}
               >
                 Rollback
@@ -141,7 +190,7 @@ export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistory
                   size="small"
                   variant="outlined"
                   startIcon={<ReplayIcon />}
-                  onClick={() => retry(run)}
+                  onClick={() => setPendingAction({ kind: 'retry', run })}
                   disabled={busyId !== null}
                 >
                   Retry failed ({run.failures.length})
@@ -189,5 +238,39 @@ export function RunHistory({ runs, storeId, authModelId, onChanged }: RunHistory
         </Accordion>
       ))}
     </SectionAccordion>
+    <ConfirmDialog
+      open={pendingAction !== null}
+      title={pendingAction?.kind === 'rollback' ? 'Roll back this run?' : 'Retry failed tuples?'}
+      confirmLabel={pendingAction?.kind === 'rollback' ? 'Delete tuples' : 'Write tuples'}
+      confirmColor={pendingAction?.kind === 'rollback' || guarded ? 'warning' : 'primary'}
+      requireTypedText={guarded ? storeName || storeId : undefined}
+      onCancel={() => setPendingAction(null)}
+      onConfirm={() => {
+        const action = pendingAction;
+        setPendingAction(null);
+        if (!action) return;
+        if (action.kind === 'rollback') void rollback(action.run);
+        else void retry(action.run);
+      }}
+      message={
+        pendingAction ? (
+          <Box component="span" sx={{ display: 'block' }}>
+            {pendingAction.kind === 'rollback' ? (
+              <>
+                This <strong>deletes {pendingAction.run.tuples.length.toLocaleString()}</strong> tuples
+              </>
+            ) : (
+              <>
+                This writes <strong>{pendingAction.run.failures.length.toLocaleString()}</strong> tuples
+              </>
+            )}{' '}
+            {pendingAction.kind === 'rollback' ? 'from' : 'to'} <strong>{storeName || storeId}</strong> ({environment.label}),
+            directly against OpenFGA (no Kafka/audit events). Run: {pendingAction.run.templateName},{' '}
+            {new Date(pendingAction.run.ts).toLocaleString()}.
+          </Box>
+        ) : null
+      }
+    />
+    </>
   );
 }
